@@ -1,0 +1,16 @@
+{
+  "base": "5194cc20dea06d725079ac162c6912fc1f0d3a78",
+  "head": "a6e65608b652f23777e451da714e2f9762a475b6",
+  "platforms": [],
+  "policy": "review-ci-v2.2-no-sonar",
+  "pr": 2797,
+  "repository": "storytold/lightcraft",
+  "source_tree": "25580896ce6c3e96aac53b3c814a68c0ec66bee7",
+  "workflows": {
+    ".github/workflows/ci.yml": "c24185e6b6a92c367a567d800f2b9afb99adb0f72880496caeeec599dab3ff32",
+    ".github/workflows/freebsd.yml": "061aee843bf892af551107024dcf057fab2a4f3b9d0a7daeecd6a5ef8d29e4e8",
+    ".github/workflows/nix.yml": "1c601a718b5dc90ca21f7d3ab62c6c8a1acb3a797681dfaaf7bb8c8601d7d12a",
+    ".github/workflows/packaging-lint.yml": "ad444e2d427b7907e19d341c635d0b1d00f5c69762ba3599ec764de86a3f8799",
+    ".github/workflows/windows-arm64.yml": "0e20c48ab7dfa1e5d3a1647c97891c31466500fa381be07768708c5d35359e45"
+  }
+}
