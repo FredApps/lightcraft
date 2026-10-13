@@ -287,11 +287,13 @@ fn fs_store_roundtrip() {
 }
 
 /// A library on an SMB share (issue #1407): macOS can't make the full flush there (`F_FULLFSYNC`
-/// fails with ENOTSUP), and the new library's snapshot, its log and `prefs.json` are still written.
+/// fails with ENOTSUP), so the files are flushed with a plain `fsync` and the new library's
+/// snapshot, its log and `prefs.json` are still written.
 #[test]
 fn a_volume_without_a_full_flush_still_gets_its_files() {
     let dir = std::env::temp_dir().join(format!("lc-journal-nofullsync-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
+    let fsyncs = crate::store::plain_fsyncs();
     let c = {
         let _smb = crate::store::full_sync_unsupported();
         let (mut j, mut c, r) = Journal::open(Box::new(FsStore::open(&dir).unwrap())).unwrap();
@@ -305,6 +307,8 @@ fn a_volume_without_a_full_flush_still_gets_its_files() {
         let mut s = FsStore::open(&dir).unwrap();
         s.write_atomic("prefs.json", b"{}").unwrap();
         s.truncate(LOG, 0).unwrap();
+        // the new library's snapshot, the append, the snapshot and the emptied log, prefs.json, the truncate
+        assert_eq!(crate::store::plain_fsyncs() - fsyncs, 6, "each sync falls back to fsync");
         c
     };
     let mut names: Vec<String> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
