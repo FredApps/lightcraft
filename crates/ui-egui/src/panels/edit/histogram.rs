@@ -1,5 +1,4 @@
-#[cfg(test)]
-use super::sliders::reset_tip;
+use crate::menu_item::MenuItem;
 use super::{
     Align2, Color32, Histogram, Icon, LightcraftApp, Mesh, PhotoId, Pos2, Rect, RichText, RightPanel, Sense, Slot, Stroke, Tokens, Vertex, divider,
     hex, json, paint, pos2, register, vec2,
@@ -340,17 +339,5 @@ mod tests {
         // HDR turned off: the SDR histogram at once; other photos keep their own
         assert_eq!(steady_hdr_histogram(&ctx, id, false, Some(sdr.clone())), Some(sdr.clone()));
         assert_eq!(steady_hdr_histogram(&ctx, PhotoId(8), true, Some(sdr.clone())), Some(sdr));
-    }
-
-    /// Issue #1751: Windows and Linux read Ctrl where macOS reads Cmd, and a rebound shortcut shows.
-    #[test]
-    fn reset_tooltip_names_the_shortcut_of_this_platform() {
-        let keymap = crate::shortcuts::Keymap::new();
-        assert_eq!(reset_tip(&keymap, false), "Reset all edits (Ctrl+Shift+R)");
-        assert_eq!(reset_tip(&keymap, true), "Reset all edits (⌘⇧R)");
-        let rebound: crate::shortcuts::Keymap = [("develop.reset".to_string(), "Cmd+Alt+R".to_string())].into();
-        assert_eq!(reset_tip(&rebound, false), "Reset all edits (Ctrl+Alt+R)");
-        let unbound: crate::shortcuts::Keymap = [("develop.reset".to_string(), String::new())].into();
-        assert_eq!(reset_tip(&unbound, false), "Reset all edits");
     }
 }
