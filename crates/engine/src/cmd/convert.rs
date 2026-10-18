@@ -235,6 +235,7 @@ fn fill_missing_meta(id: lightcraft_catalog::PhotoId, ph: &lightcraft_catalog::P
     }
     if m.shutter.is_empty() {
         m.shutter = src.shutter.clone();
+        m.exposure_time = src.exposure_time;
     }
     m.focal_mm = m.focal_mm.or(src.focal_mm);
     m.aperture = m.aperture.or(src.aperture);

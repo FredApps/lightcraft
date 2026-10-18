@@ -887,7 +887,7 @@ impl Rule {
             "captureDate" => date_op(op, p.captured.as_deref(), value),
             "importDate" => date_op(op, Some(&p.imported), value),
             "editDate" => date_op(op, p.edited.as_deref(), value),
-            "shutterSpeed" => num_op(op, crate::parse_shutter_seconds(&m.shutter), &shutter_value(value)),
+            "shutterSpeed" => num_op(op, m.shutter_seconds(), &shutter_value(value)),
             "iso" => num_op(op, m.iso.map(|v| v as f64), value),
             "aperture" => num_op(op, m.aperture.map(|v| v as f64), value),
             "focalLength" => num_op(op, m.focal_mm.map(|v| v as f64), value),
