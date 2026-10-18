@@ -118,14 +118,19 @@ fn analyze(s: &mut Session, p: &Value) -> Result<Value> {
         s.commit("Assisted Culling", Op::Batch { ops })?;
     }
     if stacks > 0 {
-        // a photo now hidden inside a collapsed stack must not stay the active one
+        // a photo now hidden inside a collapsed stack must not stay the active one: its stack's
+        // top takes over, and the rest of the selection (what was culled) stays selected
         let vis = s.visible_cloned();
         if let Some(a) = s.selection.active
             && !vis.contains(&a)
             && let Some(st) = s.catalog.stack_of(a)
         {
             let top = vis.iter().copied().find(|p| st.photos.contains(p)).unwrap_or(st.top());
-            s.selection = crate::Selection::single(top);
+            s.selection.ids.retain(|id| vis.contains(id));
+            if !s.selection.ids.contains(&top) {
+                s.selection.ids.push(top);
+            }
+            s.selection.active = Some(top);
         }
     }
     Ok(json!({"photos": out, "groups": best.len(), "stacks": stacks, "rejected": rejected, "picked": picked, "failed": failed}))

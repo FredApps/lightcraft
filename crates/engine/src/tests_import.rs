@@ -928,8 +928,12 @@ fn assisted_culling_stacks_each_burst_best_on_top() {
     // a photo named twice is measured and stacked once
     let mut twice = ids.clone();
     twice.push(sharp.0);
+    s.selection = crate::Selection { ids: vec![soft, sharp, softer, other], active: Some(soft) };
     let r = s.execute("photo.analyze", &json!({"ids": twice, "stackGroups": true})).unwrap();
     assert_eq!((r["stacks"].clone(), r["groups"].clone()), (json!(1), json!(1)), "{r}");
+    // the active photo went into the collapsed stack: its top takes over, the loose photo stays selected
+    assert_eq!(s.selection.active, Some(sharp));
+    assert!(s.selection.ids.contains(&other) && s.selection.ids.contains(&sharp) && !s.selection.ids.contains(&soft), "{:?}", s.selection.ids);
     let st = s.catalog.stack_of(sharp).unwrap().clone();
     assert!(st.collapsed && st.top() == sharp, "the sharpest photo tops the stack");
     let mut members = st.photos.clone();
