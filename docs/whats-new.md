@@ -1,5 +1,14 @@
 # What's new in LightCraft
 
+## 2026-10-19
+
+### Reduce motion
+- **Settings ▸ Interface ▸ Reduce motion** (also View ▸ Reduce Motion, `view.reduceMotion`) turns off the animations
+  that move or turn: a click on the photo or Z zooms at once instead of easing in, the interface's own small easing
+  stops, the Synchronize Folder spinner becomes a still dot, and the activity panel's sweeping bar becomes a still
+  segment. Fades that tell you something changed (toasts, the slideshow's crossfade and its control bar) stay. Off by
+  default; pinch and scroll zoom were never animated.
+
 ## 2026-10-14
 
 ### Model downloads time out on a name that doesn't resolve

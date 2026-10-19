@@ -391,6 +391,9 @@ pub struct AppSettings {
     /// View ▸ Zoom to Focus Point: Toggle Zoom (Z) centres the zoomed view on the camera's focus point
     /// when the photo has one (`view.zoomToFocus`).
     pub zoom_to_focus: bool,
+    /// Settings ▸ Interface ▸ Reduce motion: things that move or turn stand still; fades stay
+    /// (`view.reduceMotion`; see [`crate::motion`]).
+    pub reduce_motion: bool,
 }
 
 impl Default for AppSettings {
@@ -420,6 +423,7 @@ impl Default for AppSettings {
             keyword_chips: KeywordChips::default(),
             focus_point: false,
             zoom_to_focus: true,
+            reduce_motion: false,
         }
     }
 }
