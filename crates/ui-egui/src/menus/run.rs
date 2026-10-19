@@ -294,6 +294,11 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
             app.ui.settings.zoom_to_focus = p.get("on").and_then(Value::as_bool).unwrap_or(!app.ui.settings.zoom_to_focus);
             Ok(json!({"on": app.ui.settings.zoom_to_focus}))
         }
+        "view.reduceMotion" => {
+            // {on?}; no params toggles. Zoom and spinner animations stop; fades stay.
+            app.ui.settings.reduce_motion = p.get("on").and_then(Value::as_bool).unwrap_or(!app.ui.settings.reduce_motion);
+            Ok(json!({"on": app.ui.settings.reduce_motion}))
+        }
         "view.faceBoxes" => {
             app.ui.face_boxes = p.get("show").and_then(Value::as_bool).unwrap_or(!app.ui.face_boxes);
             Ok(json!({"show": app.ui.face_boxes}))
