@@ -318,7 +318,11 @@ fn plan(net: &Net, tile: usize, max_binding: u64) -> Result<(Layout, Vec<Layer>)
         let out_t = i + 1;
         match op {
             Op::Conv(c) => {
-                let cin_padded = if c.src == 0 && net.in_channels == 3 { 4 } else { c.cin };
+                let c0_raw = chan(c.src);
+                let c1_raw = c.src2.map_or(0, chan);
+                let c0 = if c.src == 0 && net.in_channels == 3 { 4 } else { c0_raw };
+                let c1 = c.src2.map_or(0, |t| if t == 0 && net.in_channels == 3 { 4 } else { chan(t) });
+                let cin_padded = c0 + c1;
                 let last = if ends_bayer { i + 2 == n_ops } else { i + 1 == n_ops };
                 let cout_padded = if last && ends_linear_rgb { round_up(c.cout, 4) } else { c.cout };
                 if !cin_padded.is_multiple_of(4) || !cout_padded.is_multiple_of(4) {
@@ -332,11 +336,17 @@ fn plan(net: &Net, tile: usize, max_binding: u64) -> Result<(Layout, Vec<Layer>)
                 let taps = c.k * c.k;
                 let mut weight = vec![0f32; taps * cin_padded * npad];
                 for co in 0..c.cout {
-                    for ci in 0..c.cin {
-                        for ky in 0..c.k {
-                            for kx in 0..c.k {
-                                let v = c.weight.get(((co * c.cin + ci) * c.k + ky) * c.k + kx).copied().unwrap_or(0.0);
-                                if let Some(w) = weight.get_mut(((ky * c.k + kx) * cin_padded + ci) * npad + co) {
+                    for ky in 0..c.k {
+                        for kx in 0..c.k {
+                            for ci0 in 0..c0_raw {
+                                let v = c.weight.get(((co * c.cin + ci0) * c.k + ky) * c.k + kx).copied().unwrap_or(0.0);
+                                if let Some(w) = weight.get_mut(((ky * c.k + kx) * cin_padded + ci0) * npad + co) {
+                                    *w = v;
+                                }
+                            }
+                            for ci1 in 0..c1_raw {
+                                let v = c.weight.get(((co * c.cin + (c0_raw + ci1)) * c.k + ky) * c.k + kx).copied().unwrap_or(0.0);
+                                if let Some(w) = weight.get_mut(((ky * c.k + kx) * cin_padded + (c0 + ci1)) * npad + co) {
                                     *w = v;
                                 }
                             }
@@ -348,8 +358,6 @@ fn plan(net: &Net, tile: usize, max_binding: u64) -> Result<(Layout, Vec<Layer>)
                     b.copy_from_slice(&c.bias);
                 }
                 let m = s * s;
-                let c0 = if c.src == 0 && net.in_channels == 3 { 4 } else { chan(c.src) };
-                let c1 = c.src2.map_or(0, |t| if t == 0 && net.in_channels == 3 { 4 } else { chan(t) });
                 let params = ConvParams {
                     h: s as u32,
                     w: s as u32,
@@ -906,6 +914,7 @@ mod tests {
         n
     }
 
+    /// Generates and loads a synthetic linear RGB U-Net ONNX model for GPU testing.
     fn linear_rgb_net(tile: u64, ch: u64, depth: usize, seed: u64) -> Net {
         let path = std::env::temp_dir().join(format!("lc-nn-lin-{}-{tile}-{ch}-{depth}-{seed}.onnx", std::process::id()));
         std::fs::write(&path, synthetic::unet_linear_rgb_onnx(tile, ch, depth, seed)).unwrap();
@@ -963,6 +972,7 @@ mod tests {
         }
     }
 
+    /// Verifies that GPU NetRunner outputs for linear RGB models match pure-Rust CPU runner.
     #[test]
     fn linear_rgb_gpu_matches_pure_rust_cpu() {
         for (tile, ch, depth, seed) in [(4u64, 4u64, 1usize, 1u64), (16, 8, 2, 2), (32, 8, 2, 3), (64, 16, 3, 5)] {
@@ -975,6 +985,25 @@ mod tests {
             eprintln!("{}: linear RGB tile {tile}, {ch} channels, depth {depth}: off by {e:e} of CPU output", g.adapter());
             assert!(e < 1e-3, "linear RGB tile {tile}, {ch} channels, depth {depth}: GPU differs from CPU ({e:e})");
         }
+    }
+
+    /// Tests two-source convolution joining 3-channel input tensor with intermediate activation tensors on GPU vs CPU.
+    #[test]
+    fn linear_rgb_gpu_two_source_conv_matches_cpu() {
+        use lightcraft_denoise::net::Conv;
+        let tile = 8usize;
+        let c1 = Conv { src: 0, src2: None, cin: 3, cout: 4, k: 3, weight: picture(3 * 4 * 9, 101), bias: picture(4, 102), leaky: Some(0.2) };
+        let c2 = Conv { src: 0, src2: Some(1), cin: 7, cout: 4, k: 3, weight: picture(7 * 4 * 9, 103), bias: picture(4, 104), leaky: Some(0.2) };
+        let c3 = Conv { src: 2, src2: Some(0), cin: 7, cout: 4, k: 3, weight: picture(7 * 4 * 9, 105), bias: picture(4, 106), leaky: Some(0.2) };
+        let c4 = Conv { src: 3, src2: None, cin: 4, cout: 3, k: 1, weight: picture(4 * 3, 107), bias: picture(3, 108), leaky: None };
+        let n = Net::new(3, vec![Op::Conv(c1), Op::Conv(c2), Op::Conv(c3), Op::Conv(c4)]).unwrap();
+        let Some(g) = gpu(&n, tile) else { return };
+        let x = picture(3 * tile * tile, 42);
+        let got = g.run(&x).unwrap();
+        let cpu = lightcraft_denoise::cpu::NetRunner::new(&n, tile).unwrap().run(&x).unwrap();
+        let e = worst(&got, &cpu);
+        eprintln!("{}: linear RGB two-source conv tile {tile}: off by {e:e} of CPU output", g.adapter());
+        assert!(e < 1e-3, "linear RGB two-source conv GPU differs from CPU ({e:e})");
     }
 
     // Issue #479: several pixels loaded by different invocations shared a vec4,
