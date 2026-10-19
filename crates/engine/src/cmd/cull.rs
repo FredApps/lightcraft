@@ -109,24 +109,44 @@ fn analyze(s: &mut Session, p: &Value) -> Result<Value> {
     let mut stacks = 0;
     if stack_groups {
         // Photos already in a stack stay where they are (like `stack.auto`): a burst is stacked
-        // from its other photos when two or more remain, with the sharpest of those on top.
+        // from its other photos when two or more remain. A burst culling grouped has the sharpest
+        // of those on top; a burst arranged by hand keeps its order, its pick (place 0) on top.
         let index = s.catalog.stack_index();
         let mut members: std::collections::BTreeMap<u32, Vec<(PhotoId, f32)>> = Default::default();
-        for (i, g) in group_of.iter().enumerate() {
-            if let (Some(g), Some(r)) = (g, rows.get(i))
-                && !index.contains_key(&r.0)
-                && s.catalog.photo(r.0).is_some_and(|ph| !ph.deleted)
-            {
-                members.entry(*g).or_default().push((r.0, r.2));
+        let mut arranged: std::collections::BTreeMap<u32, Vec<(u32, PhotoId)>> = Default::default();
+        for (i, r) in rows.iter().enumerate() {
+            if index.contains_key(&r.0) || !s.catalog.photo(r.0).is_some_and(|ph| !ph.deleted) {
+                continue;
+            }
+            match kept[i] {
+                Some(k) => {
+                    if let Some(g) = k.group {
+                        arranged.entry(g).or_default().push((k.rank.unwrap_or(u32::MAX), r.0));
+                    }
+                }
+                None => {
+                    if let Some(g) = group_of[i] {
+                        members.entry(g).or_default().push((r.0, r.2));
+                    }
+                }
             }
         }
+        let mut orders: Vec<Vec<PhotoId>> = Vec::new();
         for group in members.values() {
             let Some(top) = group.iter().fold(None::<(PhotoId, f32)>, |b, m| if b.is_none_or(|b| m.1 > b.1) { Some(*m) } else { b }) else {
                 continue;
             };
-            let photos: Vec<PhotoId> = group.iter().map(|m| m.0).collect();
+            let mut photos = vec![top.0];
+            photos.extend(group.iter().map(|m| m.0).filter(|p| *p != top.0));
+            orders.push(photos);
+        }
+        for group in arranged.values_mut() {
+            group.sort();
+            orders.push(group.iter().map(|m| m.1).collect());
+        }
+        for photos in orders {
             if photos.len() >= 2
-                && let Some(op) = s.catalog.group_ops(top.0, &photos, true)
+                && let Some(op) = s.catalog.group_ops(photos[0], &photos, true)
             {
                 ops.push(op);
                 stacks += 1;

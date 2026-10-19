@@ -239,6 +239,12 @@ fn culling_again_keeps_bursts_arranged_by_hand() {
     let g2_again = an(&s, second[0]).group.unwrap();
     assert_ne!(g2_again, g1, "an automatic burst never takes a hand-made burst's number");
     assert_eq!(s.catalog.burst(g2_again), second);
+    // stacking each burst stacks the one arranged by hand too, in its order, the pick on top
+    let r = s.execute("photo.analyze", &json!({"ids": ids(&[first.clone(), second.clone()].concat()), "stackGroups": true})).unwrap();
+    assert_eq!(r["stacks"], 2, "{r}");
+    let st = s.catalog.stack_of(softest).expect("the hand-arranged burst is stacked");
+    assert_eq!(st.photos, vec![first[2], first[0], first[1]], "in the order set by hand, its pick on top");
+    assert_eq!(s.catalog.stack_of(second[0]).map(|st| st.top()), Some(second[0]), "an automatic burst: the sharpest on top");
     // asked to regroup, culling forgets the order set by hand
     s.execute("photo.analyze", &json!({"ids": ids(&first), "resetBursts": true})).unwrap();
     let g = an(&s, first[0]).group.unwrap();

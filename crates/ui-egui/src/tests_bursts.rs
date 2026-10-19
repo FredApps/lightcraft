@@ -115,6 +115,24 @@ fn bursts_show_their_pick_first() {
     widget(&h, "burst:none");
 }
 
+/// A burst whose photos are all hidden in a collapsed stack of another burst's photo is still
+/// listed, so it can be arranged.
+#[test]
+fn a_burst_hidden_in_another_bursts_stack_is_listed() {
+    let (mut h, [a, _, _, d, e, _]) = app();
+    h.app.session.selection.ids = vec![a, d, e];
+    h.app.session.selection.active = Some(a);
+    h.app.session.execute("stack.group", &json!({"collapsed": true})).unwrap();
+    for _ in 0..4 {
+        h.step();
+    }
+    let visible = h.app.session.visible_cloned();
+    assert!(visible.contains(&a) && !visible.contains(&d) && !visible.contains(&e), "d and e are hidden under a: {visible:?}");
+    let (one, two) = (widget(&h, "burst:1"), widget(&h, "burst:2"));
+    assert!(one.top() < two.top(), "listed after the burst of the stack's top");
+    assert!(cell(&h, d).top() >= two.bottom() && cell(&h, e).top() >= two.bottom(), "with its photos");
+}
+
 #[test]
 fn a_photo_dragged_to_the_front_becomes_the_pick() {
     let (mut h, [a, b, c, ..]) = app();

@@ -40,13 +40,17 @@ fn bursts(app: &mut LightcraftApp) -> Shown {
         return b.clone();
     }
     let cat = &app.session.catalog;
-    let mut scope: HashSet<PhotoId> = ids.iter().copied().collect();
+    // each photo in view, then the hidden members of its stack: a burst whose photos are all
+    // hidden in another burst's collapsed stack is listed too, after that stack's top
+    let mut anchors: Vec<PhotoId> = Vec::with_capacity(ids.len());
     for id in ids.iter() {
+        anchors.push(*id);
         if let Some(st) = cat.stack_of(*id) {
-            scope.extend(st.photos.iter().copied());
+            anchors.extend(st.photos.iter().copied().filter(|p| p != id));
         }
     }
-    let b: Shown = Arc::new(cat.bursts_among(&ids, Some(&scope)));
+    let scope: HashSet<PhotoId> = anchors.iter().copied().collect();
+    let b: Shown = Arc::new(cat.bursts_among(&anchors, Some(&scope)));
     app.caches.bursts = Some((generation, b.clone()));
     b
 }
