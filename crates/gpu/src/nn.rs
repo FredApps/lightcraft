@@ -769,6 +769,7 @@ impl NetRunner {
         self.wake.notify_one();
     }
 
+    /// Upload `input` into `w`, dispatch the network's kernels, wait for the GPU and read the output tile back.
     fn execute(&self, w: &Workspace, input: &[f32]) -> Result<Vec<f32>, Error> {
         let d = self.shared.dev;
         let (t, c) = (self.tile, self.in_channels);

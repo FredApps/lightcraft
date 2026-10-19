@@ -50,14 +50,17 @@ fn widget(h: &Headless, id: &str) -> Option<Rect> {
     h.app.widgets.iter().find(|(w, _)| w == id).map(|(_, r)| *r)
 }
 
+/// Forward-slash normalized path string used in folder widget IDs across platforms.
 fn folder_id(dir: &Path) -> String {
     dir.to_string_lossy().replace('\\', "/")
 }
 
+/// Widget ID for the expand/collapse toggle of `dir` in the library folder tree.
 fn folder_toggle(dir: &Path) -> String {
     format!("libraryFolderToggle:{}", folder_id(dir))
 }
 
+/// Look up the bounding rectangle of `dir`'s row in the library folder tree.
 fn folder_row(h: &Headless, dir: &Path) -> Option<Rect> {
     widget(h, &format!("source:libfolder:{}", folder_id(dir)))
 }
@@ -183,6 +186,7 @@ fn local_photos_are_refused_with_the_reason() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// Dropping a photo onto the folder that already holds it shows an "Already in" hint and leaves undo unchanged.
 #[test]
 fn photos_already_in_the_folder_stay_put() {
     let (root, trip, home) = folders("here");
@@ -283,6 +287,7 @@ fn drop_beach(h: &mut Headless, beach: u64, target: Rect) {
     h.step();
 }
 
+/// Cancelling the move confirmation dialog leaves the file in its original folder without recording an undo step.
 #[test]
 fn cancelling_the_question_moves_nothing() {
     let (root, trip, home) = folders("cancel");
@@ -305,6 +310,7 @@ fn cancelling_the_question_moves_nothing() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// Ticking "Don't ask again" in the move confirmation dialog persists the setting and moves subsequent drops immediately.
 #[test]
 fn dont_ask_again_moves_the_next_drop_at_once() {
     let (root, trip, home) = folders("dont-ask");
@@ -331,6 +337,7 @@ fn dont_ask_again_moves_the_next_drop_at_once() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// Confirming a pending move dialog after another library has been opened refuses the move and leaves files untouched.
 #[test]
 fn a_question_left_open_while_another_library_opens_moves_nothing() {
     let (root, trip, home) = folders("other-library");

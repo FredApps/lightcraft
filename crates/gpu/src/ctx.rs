@@ -593,11 +593,14 @@ pub(crate) fn wait_for_map(
     }
     let deadline = std::time::Instant::now() + timeout;
     loop {
-        let _ = device.poll(wgpu::PollType::Poll);
+        let poll = device.poll(wgpu::PollType::Poll);
         match rx.try_recv() {
             Ok(r) => return Ok(r),
             Err(std::sync::mpsc::TryRecvError::Disconnected) => return Err(std::sync::mpsc::RecvTimeoutError::Disconnected),
             Err(std::sync::mpsc::TryRecvError::Empty) => {
+                if poll.is_err() {
+                    return Err(std::sync::mpsc::RecvTimeoutError::Disconnected);
+                }
                 if std::time::Instant::now() >= deadline {
                     return Err(std::sync::mpsc::RecvTimeoutError::Timeout);
                 }
