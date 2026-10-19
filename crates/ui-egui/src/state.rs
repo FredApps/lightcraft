@@ -392,8 +392,9 @@ pub struct AppSettings {
     /// when the photo has one (`view.zoomToFocus`).
     pub zoom_to_focus: bool,
     /// Settings ▸ Interface ▸ Reduce motion: things that move or turn stand still; fades stay
-    /// (`view.reduceMotion`; see [`crate::motion`]).
-    pub reduce_motion: bool,
+    /// (`view.reduceMotion`; see [`crate::motion`]). `None`: follow the system's Reduce Motion until
+    /// the user chooses.
+    pub reduce_motion: Option<bool>,
 }
 
 impl Default for AppSettings {
@@ -423,7 +424,7 @@ impl Default for AppSettings {
             keyword_chips: KeywordChips::default(),
             focus_point: false,
             zoom_to_focus: true,
-            reduce_motion: false,
+            reduce_motion: None,
         }
     }
 }
