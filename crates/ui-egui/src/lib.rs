@@ -60,6 +60,8 @@ mod tests_before_after;
 #[cfg(test)]
 mod tests_browse_active;
 #[cfg(test)]
+mod tests_bursts;
+#[cfg(test)]
 mod tests_button;
 #[cfg(test)]
 mod tests_canvas_keys;
@@ -1625,6 +1627,8 @@ mod drop_tests {
 #[derive(Default)]
 pub struct Caches {
     keyword_tree: Option<(u64, std::sync::Arc<Vec<lightcraft_catalog::KeywordNode>>)>,
+    /// The Bursts panel's bursts, by the view's generation.
+    bursts: Option<(u64, panels::bursts::Shown)>,
     /// The Keywording box's read-only names (with containing keywords, or Will Export), by library
     /// revision, selection and view.
     keyword_names: Option<(u64, u64, std::sync::Arc<Vec<panels::keywording::Chip>>)>,
