@@ -918,7 +918,8 @@ pub(crate) fn make_product(spec: &JobSpec, progress: Option<&Progress>) -> Resul
             Domain::BayerToRgb => {
                 if raw.cpp != 1 || !raw.cfa.as_ref().is_some_and(lightcraft_raw::Cfa::is_bayer) {
                     return Err(MakeError::Unsupported(
-                        "only Bayer raw files can be denoised with a Bayer model (this one has another sensor layout or is already demosaiced)".into(),
+                        "only Bayer raw files can be denoised with a Bayer model (this one has another sensor layout or is already demosaiced)"
+                            .into(),
                     ));
                 }
                 let n = raw.normalized().map_err(|e| MakeError::Failed(e.to_string()))?;
@@ -932,9 +933,7 @@ pub(crate) fn make_product(spec: &JobSpec, progress: Option<&Progress>) -> Resul
             }
             Domain::LinearRgb => {
                 if raw.cpp != 1 && raw.cpp != 3 {
-                    return Err(MakeError::Unsupported(
-                        "only raw files with 1 or 3 samples per pixel can be denoised".into(),
-                    ));
+                    return Err(MakeError::Unsupported("only raw files with 1 or 3 samples per pixel can be denoised".into()));
                 }
                 let n = raw.normalized().map_err(|e| MakeError::Failed(e.to_string()))?;
                 let camera_rgb = lightcraft_raw::demosaic(&n, lightcraft_raw::Method::Ahd);
@@ -985,9 +984,7 @@ pub(crate) fn make_product(spec: &JobSpec, progress: Option<&Progress>) -> Resul
         DenoiseInput::Bayer { mosaic, layout } => {
             pool.install(|| denoise_bayer(&mosaic.data, mosaic.width, mosaic.height, layout, runner, &params, &ctl))?
         }
-        DenoiseInput::LinearRgb { camera_rgb } => {
-            pool.install(|| denoise_linear_rgb(&camera_rgb, runner, &params, &ctl))?
-        }
+        DenoiseInput::LinearRgb { camera_rgb } => pool.install(|| denoise_linear_rgb(&camera_rgb, runner, &params, &ctl))?,
     };
     if cancelled() {
         return Err(MakeError::Cancelled);
