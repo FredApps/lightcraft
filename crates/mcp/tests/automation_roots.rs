@@ -222,3 +222,18 @@ fn render_photo_in_memory_succeeds_under_confinement() {
 
     let _ = std::fs::remove_dir_all(base);
 }
+
+#[test]
+fn symlink_directory_outside_read_root_is_not_traversed() {
+    let (mut server, base) = confined("symlink_dir", true, true);
+    #[cfg(unix)]
+    let made = std::os::unix::fs::symlink(base.join("outside"), base.join("in/link_outside")).is_ok();
+    #[cfg(windows)]
+    let made = std::os::windows::fs::symlink_dir(base.join("outside"), base.join("in/link_outside")).is_ok();
+    if made {
+        let in_dir = s(&base.join("in"));
+        let text = ok(&mut server, "import", json!({"paths": [in_dir]}));
+        assert!(!text.contains(SECRET), "Must not leak secret via symlink directory: {text}");
+    }
+    let _ = std::fs::remove_dir_all(base);
+}

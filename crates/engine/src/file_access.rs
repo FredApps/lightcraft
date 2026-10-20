@@ -39,6 +39,7 @@ pub struct AutomationRoots {
     write: Option<Root>,
 }
 
+/// An existing filesystem root folder with its canonical path and display path.
 #[derive(Debug)]
 struct Root {
     /// The folder made absolute, links followed: what paths are compared with.
@@ -140,6 +141,7 @@ impl Drop for Restore {
     }
 }
 
+/// Executes `f` within the given thread-local scope, restoring the previous scope on drop.
 fn with_scope<T>(scope: Option<Scope>, f: impl FnOnce() -> T) -> T {
     let _restore = Restore(SCOPE.with(|s| s.replace(scope)));
     f()
@@ -248,6 +250,7 @@ fn inside(path: &Path, root: &Path) -> bool {
     root.components().all(|r| path.next().is_some_and(|p| same_component(p, r)))
 }
 
+/// Compares two path components, ignoring case on Windows.
 fn same_component(a: Component, b: Component) -> bool {
     if a == b {
         return true;

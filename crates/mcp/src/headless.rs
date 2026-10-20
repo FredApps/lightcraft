@@ -43,6 +43,7 @@ impl Headless {
         Self { session, progress: None, roots: None }
     }
 
+    /// Configures the automation roots for this headless backend.
     pub fn with_automation_roots(mut self, roots: impl Into<Option<Arc<AutomationRoots>>>) -> Self {
         self.roots = roots.into();
         self

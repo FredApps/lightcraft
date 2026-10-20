@@ -453,6 +453,7 @@ fn image_result(file: &std::path::Path, max: Option<u32>, format: &str, save_to:
     image_result_from_bytes(bytes, max, format, save_to, meta)
 }
 
+/// Wrap image bytes as MCP image content, optionally re-encoding or writing to disk.
 fn image_result_from_bytes(bytes: Vec<u8>, max: Option<u32>, format: &str, save_to: Option<&str>, meta: Value) -> ToolResult {
     let jpeg = matches!(format, "jpeg" | "jpg");
     let (w, h) = (meta["width"].as_u64().unwrap_or(0) as u32, meta["height"].as_u64().unwrap_or(0) as u32);
@@ -504,6 +505,7 @@ fn check_save_path(b: &mut dyn Backend, args: &Value) -> Result<(), String> {
     }
 }
 
+/// Render a photo with current develop settings and return as image or write to disk.
 fn render_photo(b: &mut dyn Backend, args: &Value) -> ToolResult {
     if let Err(e) = check_save_path(b, args) {
         return ToolResult::error(e);

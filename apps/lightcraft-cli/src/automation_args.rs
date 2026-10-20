@@ -3,6 +3,7 @@
 
 use std::path::PathBuf;
 
+/// Command-line arguments specifying automation confinement roots.
 pub struct AutomationArgs {
     pub read_root: Option<PathBuf>,
     pub write_root: Option<PathBuf>,
@@ -11,6 +12,7 @@ pub struct AutomationArgs {
 }
 
 impl AutomationArgs {
+    /// Creates a new argument container with the given roots.
     pub fn new(read_root: Option<PathBuf>, write_root: Option<PathBuf>) -> Self {
         Self { read_root, write_root, read_given: false, write_given: false }
     }
