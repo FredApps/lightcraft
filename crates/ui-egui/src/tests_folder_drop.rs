@@ -50,8 +50,19 @@ fn widget(h: &Headless, id: &str) -> Option<Rect> {
     h.app.widgets.iter().find(|(w, _)| w == id).map(|(_, r)| *r)
 }
 
+/// Forward-slash normalized path string used in folder widget IDs across platforms.
+fn folder_id(dir: &Path) -> String {
+    dir.to_string_lossy().replace('\\', "/")
+}
+
+/// Widget ID for the expand/collapse toggle of `dir` in the library folder tree.
+fn folder_toggle(dir: &Path) -> String {
+    format!("libraryFolderToggle:{}", folder_id(dir))
+}
+
+/// Look up the bounding rectangle of `dir`'s row in the library folder tree.
 fn folder_row(h: &Headless, dir: &Path) -> Option<Rect> {
-    widget(h, &format!("source:libfolder:{}", dir.to_string_lossy()))
+    widget(h, &format!("source:libfolder:{}", folder_id(dir)))
 }
 
 fn id_of(h: &Headless, file: &str) -> u64 {
@@ -175,12 +186,13 @@ fn local_photos_are_refused_with_the_reason() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// Dropping a photo onto the folder that already holds it shows an "Already in" hint and leaves undo unchanged.
 #[test]
 fn photos_already_in_the_folder_stay_put() {
     let (root, trip, home) = folders("here");
     let mut h = app(&[(trip.join("beach.png"), false), (home.join("garden.png"), false)]);
     // open the folder holding both
-    let toggle = widget(&h, &format!("libraryFolderToggle:{}", root.to_string_lossy())).unwrap();
+    let toggle = widget(&h, &folder_toggle(&root)).unwrap();
     h.app.synthetic.push(egui::Event::PointerMoved(toggle.center()));
     h.app.synthetic.push(egui::Event::PointerButton {
         pos: toggle.center(),
@@ -275,6 +287,7 @@ fn drop_beach(h: &mut Headless, beach: u64, target: Rect) {
     h.step();
 }
 
+/// Cancelling the move confirmation dialog leaves the file in its original folder without recording an undo step.
 #[test]
 fn cancelling_the_question_moves_nothing() {
     let (root, trip, home) = folders("cancel");
@@ -284,7 +297,7 @@ fn cancelling_the_question_moves_nothing() {
     let target = if folder_row(&h, &home).is_some() {
         target
     } else {
-        click(&mut h, &format!("libraryFolderToggle:{}", root.to_string_lossy()));
+        click(&mut h, &folder_toggle(&root));
         folder_row(&h, &home).unwrap()
     };
     let undo = h.app.session.undo.len();
@@ -297,12 +310,13 @@ fn cancelling_the_question_moves_nothing() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// Ticking "Don't ask again" in the move confirmation dialog persists the setting and moves subsequent drops immediately.
 #[test]
 fn dont_ask_again_moves_the_next_drop_at_once() {
     let (root, trip, home) = folders("dont-ask");
     std::fs::copy(trip.join("beach.png"), trip.join("dunes.png")).unwrap();
     let mut h = app(&[(trip.join("beach.png"), false), (trip.join("dunes.png"), false), (home.join("garden.png"), false)]);
-    click(&mut h, &format!("libraryFolderToggle:{}", root.to_string_lossy()));
+    click(&mut h, &folder_toggle(&root));
     let target = folder_row(&h, &home).unwrap();
     let beach = id_of(&h, "beach.png");
     h.app.session.selection = lightcraft_engine::Selection::single(lightcraft_catalog::PhotoId(beach));
@@ -323,11 +337,12 @@ fn dont_ask_again_moves_the_next_drop_at_once() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// Confirming a pending move dialog after another library has been opened refuses the move and leaves files untouched.
 #[test]
 fn a_question_left_open_while_another_library_opens_moves_nothing() {
     let (root, trip, home) = folders("other-library");
     let mut h = app(&[(trip.join("beach.png"), false), (home.join("garden.png"), false)]);
-    click(&mut h, &format!("libraryFolderToggle:{}", root.to_string_lossy()));
+    click(&mut h, &folder_toggle(&root));
     let beach = id_of(&h, "beach.png");
     let target = folder_row(&h, &home).unwrap();
     drop_beach(&mut h, beach, target);
