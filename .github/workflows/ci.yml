@@ -1,0 +1,122 @@
+# The quality gate (`cargo xtask ci`: fmt, clippy, tests, HEIF, parity, layers, assets, wasm) on the
+# three desktop platforms. FreeBSD runs the tests in freebsd.yml; the release and packaging
+# workflows only build. Without this, a regression that shows on one platform (a cfg-gated
+# warning, a path or line-ending assumption, a Metal- or DX12-only code path) reaches users first.
+#
+# Runners have no hardware GPU, display or corpus, so the tests that need one record a skip
+# (`lightcraft_testkit::skip!`); the job summary lists every skip and why. The GPU, corpus and
+# visual checks stay on a developer machine (`cargo xtask ci --hardware`, described in the README).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # a CI build starts from nothing: incremental state only grows the cache and the target dir
+  CARGO_INCREMENTAL: "0"
+  RUST_BACKTRACE: "1"
+  # Same craft-fonts pin as freebsd.yml and release.yml (docs/releasing.md: keep them in sync).
+  # Required, so a missing or stale checkout fails the build instead of dropping CJK glyphs.
+  CRAFT_FONTS_REQUIRED: "1"
+  CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+
+jobs:
+  ci:
+    name: cargo xtask ci (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    # a from-scratch build of the whole workspace (clippy, tests, HEIF, wasm) on a 3-core runner
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            os: ubuntu-latest
+          - name: macOS arm64
+            os: macos-latest
+          - name: Windows x64
+            os: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Build scripts and tests of the pull request run in the `cargo xtask ci` step, and no step
+      # pushes or fetches through this checkout, so its token must not stay on disk.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check out craft-fonts (pinned)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: storytold/craft-fonts
+          ref: 3d9ab3a132ed0eff457e424226a435a901da30d3
+          path: craft-fonts
+          persist-credentials: false
+
+      # The windowing stack is opened with dlopen() at run time, but the crates that bind it want
+      # the headers and pkg-config files at build time (the list in nix/package.nix).
+      - name: Install Linux build libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libwayland-dev libxkbcommon-dev libx11-dev libxcb1-dev \
+            libxcursor-dev libxi-dev libxrandr-dev libdbus-1-dev
+
+      - name: Install Rust (stable, with rustfmt, clippy and the wasm32 target)
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update \
+            --component rustfmt --component clippy --target wasm32-unknown-unknown
+          rustup default stable
+          rustc --version
+          cargo --version
+
+      # Registry and git sources only. The target dir is several GB per platform, more than the
+      # 10 GB repository cache holds for three of them.
+      - name: Cache cargo registry and git sources
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: cargo xtask ci
+        run: cargo xtask ci
+
+      # Runs after a failure too: the report says which step failed and what was skipped.
+      - name: Job summary
+        if: always()
+        run: |
+          if [ -f target/ci/summary.md ]; then
+            cat target/ci/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No CI report was written (the build failed before \`cargo xtask ci\` started)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload CI report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ci-report-${{ matrix.os }}
+          path: |
+            target/ci/report.json
+            target/ci/summary.md
+          if-no-files-found: ignore
+          retention-days: 14
