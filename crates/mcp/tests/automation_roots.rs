@@ -232,8 +232,12 @@ fn symlink_directory_outside_read_root_is_not_traversed() {
     let made = std::os::windows::fs::symlink_dir(base.join("outside"), base.join("in/link_outside")).is_ok();
     if made {
         let in_dir = s(&base.join("in"));
-        let text = ok(&mut server, "import", json!({"paths": [in_dir]}));
-        assert!(!text.contains(SECRET), "Must not leak secret via symlink directory: {text}");
+        let (error, text, reply) = call(&mut server, "import", json!({"paths": [in_dir]}));
+        assert!(!error, "import {in_dir}: {text}");
+        let imported = reply["result"]["structuredContent"]["imported"]
+            .as_array()
+            .expect("import response must contain imported photo ids");
+        assert_eq!(imported.len(), 1, "Must not import photo through symlink directory: {reply}");
     }
     let _ = std::fs::remove_dir_all(base);
 }
