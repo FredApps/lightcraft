@@ -408,10 +408,16 @@ pub fn add_found(s: &mut Session, found: Vec<Found>, group: Option<&str>, dry: b
 /// the group its folder gives and whether it was named (not found in a folder).
 fn effect_files(paths: &[String]) -> Vec<(String, Option<String>, bool)> {
     fn walk(dir: &std::path::Path, base: &std::path::Path, depth: usize, out: &mut Vec<(String, Option<String>, bool)>) {
+        if crate::file_access::check_read(dir).is_err() {
+            return;
+        }
         let Ok(rd) = std::fs::read_dir(dir) else { return };
         let mut entries: Vec<_> = rd.flatten().map(|e| e.path()).collect();
         entries.sort();
         for p in entries {
+            if crate::file_access::check_read(&p).is_err() {
+                continue;
+            }
             if p.is_dir() {
                 if depth < 8 {
                     walk(&p, base, depth + 1, out);

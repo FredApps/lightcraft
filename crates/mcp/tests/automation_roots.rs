@@ -241,3 +241,25 @@ fn symlink_directory_outside_read_root_is_not_traversed() {
     }
     let _ = std::fs::remove_dir_all(base);
 }
+
+#[test]
+fn mask_import_effects_symlink_directory_outside_read_root_is_not_traversed() {
+    let (mut server, base) = confined("mask_symlink_dir", true, true);
+    std::fs::create_dir_all(base.join("in/sub")).unwrap();
+    std::fs::write(base.join("outside/secret.lceffect"), "{}").unwrap();
+    #[cfg(unix)]
+    let made = std::os::unix::fs::symlink(base.join("outside"), base.join("in/sub/link_outside")).is_ok();
+    #[cfg(windows)]
+    let made = std::os::windows::fs::symlink_dir(base.join("outside"), base.join("in/sub/link_outside")).is_ok();
+    if made {
+        let in_dir = s(&base.join("in"));
+        let (error, text, reply) = call(&mut server, "cmd_mask_importEffects", json!({"paths": [in_dir]}));
+        assert!(!error, "mask.importEffects {in_dir}: {text}");
+        let full_response = reply.to_string();
+        assert!(
+            !full_response.contains("secret.lceffect"),
+            "Must not disclose outside directory entries through nested symlink: {reply}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(base);
+}
