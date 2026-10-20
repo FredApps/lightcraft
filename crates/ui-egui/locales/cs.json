@@ -2063,5 +2063,10 @@
   "Open Settings": "Otevřít nastavení",
   "Select none": "Zrušit celý výběr",
   "Select all": "Vybrat vše",
-  "Visualize HDR": "Zobrazit rozsah HDR"
+  "Visualize HDR": "Zobrazit rozsah HDR",
+  "Reduce Motion": "Omezit pohyb",
+  "Reduce motion": "Omezit pohyb",
+  "Turns off zoom and spinner animations. Fades stay. Follows the system's Reduce Motion until you change it here.": "Vypne animace přiblížení a načítacích indikátorů. Prolínání zůstává. Dokud to zde nezměníte, řídí se nastavením Omezit pohyb v systému.",
+  "Use the system setting": "Použít nastavení systému",
+  "Turns off zoom and spinner animations. Fades stay.": "Vypne animace přiblížení a načítacích indikátorů. Prolínání zůstává."
 }
