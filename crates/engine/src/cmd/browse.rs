@@ -27,6 +27,7 @@ fn browse(s: &mut Session, p: &Value) -> Result<Value> {
     if !dir.is_dir() {
         return Err(bad(C, format!("{path}: not a folder")));
     }
+    crate::file_access::check_read(&dir).map_err(|e| bad(C, e))?;
     let dir_s = dir.to_string_lossy().trim_end_matches(['/', '\\']).to_string();
     let subfolders = bool_or(p, "subfolders", s.browse.as_ref().is_some_and(|b| b.subfolders));
     let files: Vec<String> = if subfolders {

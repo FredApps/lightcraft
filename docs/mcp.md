@@ -45,6 +45,7 @@ For autonomous environments and sandboxed agent workflows, `lightcraft-cli mcp` 
 - **Case-insensitivity & device names**: Windows path matching is case-insensitive, and reserved DOS device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`) are unconditionally blocked.
 - **Backward compatibility**: Specifying neither root preserves 100% unconfined default behavior. Specifying one root confines only operations of that direction (e.g. `--automation-read-root` alone allows reading only from that directory, but denies writes unless `--automation-write-root` is also provided).
 - **Threat model limits**: Confinement enforces path boundary invariants against accidental or adversarial paths emitted by LLM tool calls. It does not replace OS-level kernel sandbox primitives against external processes racing or modifying folder trees concurrently.
+- **Operator configuration vs. agent file access**: Startup flags such as `--library DIR` designate operator-chosen configuration rather than LLM-directed paths. The server's internal library catalog storage is operated under unconfined authority, while all agent-driven operations (reads, imports, exports, sidecars, browsing) are strictly confined to the configured automation roots.
 
 Logs go to stderr; stdout carries only protocol messages.
 

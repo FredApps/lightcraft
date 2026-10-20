@@ -167,3 +167,39 @@ fn batch_operations_stop_and_do_not_leak_on_confined_errors() {
 
     let _ = std::fs::remove_dir_all(base);
 }
+
+#[test]
+fn sidecar_write_refused_outside_write_root() {
+    let (mut server, base) = confined("sidecar", true, true);
+    let valid_path = s(&base.join("in/photo.png"));
+    ok(&mut server, "import", json!({"paths": [valid_path]}));
+
+    // in/ is the read root, out/ is the write root.
+    // Attempting to save metadata to sidecar for the imported photo targets in/photo.xmp,
+    // which is outside the write root.
+    let (_, text, reply) = call(&mut server, "run_command", json!({"command": "photo.saveMetadataToFile", "params": {}}));
+    assert!(text.contains("outside the write root") || reply.to_string().contains("outside the write root"), "Sidecar write outside write root must be rejected: {text}");
+    assert!(!base.join("in/photo.xmp").exists(), "Denied sidecar write must not create file");
+
+    let _ = std::fs::remove_dir_all(base);
+}
+
+#[test]
+fn folder_browse_refused_outside_read_root() {
+    let (mut server, base) = confined("browse", true, true);
+    let inside_dir = s(&base.join("in"));
+    let outside_dir = s(&base.join("outside"));
+
+    // Browsing folder inside read root succeeds
+    ok(&mut server, "run_command", json!({"command": "library.browse", "params": {"path": inside_dir}}));
+
+    // Browsing folder outside read root is refused
+    refused(
+        &mut server,
+        "run_command",
+        json!({"command": "library.browse", "params": {"path": outside_dir}}),
+        "outside the read root",
+    );
+
+    let _ = std::fs::remove_dir_all(base);
+}
