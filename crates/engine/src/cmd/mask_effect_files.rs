@@ -457,7 +457,14 @@ pub fn import_effects(s: &mut Session, p: &Value) -> Result<Value> {
     let group = str_param(p, "group").map(str::trim).filter(|g| !g.is_empty());
     let dry = p.get("dryRun").and_then(Value::as_bool).unwrap_or(false);
     let (mut found, mut failed) = (Vec::new(), Vec::new());
-    for (f, dir_group, named) in effect_files(&paths) {
+    let mut allowed = Vec::new();
+    for x in &paths {
+        match crate::file_access::check_read(x) {
+            Ok(()) => allowed.push(x.clone()),
+            Err(e) => failed.push((x.clone(), e)),
+        }
+    }
+    for (f, dir_group, named) in effect_files(&allowed) {
         match read_capped(&f) {
             Ok(bytes) => {
                 if !found_in(&f, &bytes, dir_group, &mut found, &mut failed) && named {

@@ -148,10 +148,15 @@ fn read_only_root_permits_reads_but_denies_all_writes() {
 }
 
 #[test]
-fn write_only_root_permits_writes_but_denies_all_reads() {
+fn write_only_root_permits_writes_and_reads_under_write_root() {
     let (mut server, base) = confined("writeonly", false, true);
-    let valid_path = s(&base.join("in/photo.png"));
-    refused(&mut server, "import", json!({"paths": [valid_path]}), "read authority is absent");
+    let in_path = s(&base.join("in/photo.png"));
+    refused(&mut server, "import", json!({"paths": [in_path]}), "outside the read root");
+
+    // Reading under the write root is permitted
+    create_test_image(&base.join("out/photo.png"), "Output photo");
+    let out_path = s(&base.join("out/photo.png"));
+    ok(&mut server, "import", json!({"paths": [out_path]}));
 
     let _ = std::fs::remove_dir_all(base);
 }
@@ -174,11 +179,11 @@ fn sidecar_write_refused_outside_write_root() {
     let valid_path = s(&base.join("in/photo.png"));
     ok(&mut server, "import", json!({"paths": [valid_path]}));
 
-    // in/ is the read root, out/ is the write root.
-    // Attempting to save metadata to sidecar for the imported photo targets in/photo.xmp,
-    // which is outside the write root.
-    let (_, text, reply) = call(&mut server, "run_command", json!({"command": "photo.saveMetadataToFile", "params": {}}));
-    assert!(text.contains("outside the write root") || reply.to_string().contains("outside the write root"), "Sidecar write outside write root must be rejected: {text}");
+    let sidecar = base.join("in/photo.png.xmp");
+    let before = std::fs::read(&sidecar).unwrap();
+    let (error, text, reply) = call(&mut server, "run_command", json!({"command": "photo.saveMetadataToFile", "params": {}}));
+    assert!(text.contains("outside the write root") || reply.to_string().contains("outside the write root"), "{text}");
+    assert_eq!(std::fs::read(&sidecar).unwrap(), before, "Denied sidecar write must not modify the existing sidecar");
     assert!(!base.join("in/photo.xmp").exists(), "Denied sidecar write must not create file");
 
     let _ = std::fs::remove_dir_all(base);
@@ -200,6 +205,20 @@ fn folder_browse_refused_outside_read_root() {
         json!({"command": "library.browse", "params": {"path": outside_dir}}),
         "outside the read root",
     );
+
+    let _ = std::fs::remove_dir_all(base);
+}
+
+#[test]
+fn render_photo_in_memory_succeeds_under_confinement() {
+    let (mut server, base) = confined("render", true, true);
+    let valid_path = s(&base.join("in/photo.png"));
+    ok(&mut server, "import", json!({"paths": [valid_path]}));
+
+    // Calling render_photo without a path stays in memory and succeeds
+    let (error, text, reply) = call(&mut server, "render_photo", json!({}));
+    assert!(!error, "render_photo in memory must succeed under confinement: {text}");
+    assert!(reply["result"]["content"].as_array().unwrap().iter().any(|c| c["type"] == "image"));
 
     let _ = std::fs::remove_dir_all(base);
 }

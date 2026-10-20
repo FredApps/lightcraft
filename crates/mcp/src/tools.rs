@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde_json::{Map, Value, json};
 
 use crate::backend::Backend;
-use crate::base64::base64_encode;
+use crate::base64::{base64_decode, base64_encode};
 use crate::headless::{encode_image, expand_paths};
 
 /// Prefix of the tools generated from the command registry.
@@ -450,6 +450,10 @@ fn image_result(file: &std::path::Path, max: Option<u32>, format: &str, save_to:
         Err(e) => return ToolResult::error(format!("cannot read rendered image {}: {e}", file.display())),
     };
     let _ = std::fs::remove_file(file);
+    image_result_from_bytes(bytes, max, format, save_to, meta)
+}
+
+fn image_result_from_bytes(bytes: Vec<u8>, max: Option<u32>, format: &str, save_to: Option<&str>, meta: Value) -> ToolResult {
     let jpeg = matches!(format, "jpeg" | "jpg");
     let (w, h) = (meta["width"].as_u64().unwrap_or(0) as u32, meta["height"].as_u64().unwrap_or(0) as u32);
     let too_big = max.is_some_and(|m| w.max(h) > m);
@@ -483,6 +487,7 @@ fn image_result(file: &std::path::Path, max: Option<u32>, format: &str, save_to:
         info["path"] = json!(p);
     } else if let Some(o) = info.as_object_mut() {
         o.remove("path");
+        o.remove("data");
     }
     ToolResult {
         content: vec![json!({"type": "image", "data": base64_encode(&bytes), "mimeType": mime}), json!({"type": "text", "text": info.to_string()})],
@@ -512,15 +517,38 @@ fn render_photo(b: &mut dyn Backend, args: &Value) -> ToolResult {
         },
     };
     let Some(id) = id else { return ToolResult::error("no active photo: import or select one, or pass `id`") };
-    let file = temp_path("render");
-    let path = file.to_string_lossy().to_string();
-    let meta = match b.call("ui.render", json!({"id": id, "size": size, "path": path})) {
+    let save_to = args.get("path").and_then(Value::as_str);
+    let (file, render_params) = match save_to {
+        Some(p) => (None, json!({"id": id, "size": size, "path": p})),
+        None => {
+            if b.has_ui() {
+                let f = temp_path("render");
+                let path = f.to_string_lossy().to_string();
+                (Some(f), json!({"id": id, "size": size, "path": path}))
+            } else {
+                (None, json!({"id": id, "size": size}))
+            }
+        }
+    };
+    let meta = match b.call("ui.render", render_params) {
         Ok(m) => m,
         Err(e) => return ToolResult::error(e),
     };
     let mut meta = meta;
     meta["id"] = json!(id);
-    image_result(&file, None, args.get("format").and_then(Value::as_str).unwrap_or("png"), args.get("path").and_then(Value::as_str), meta)
+    if let Some(data) = meta.get("data").and_then(Value::as_str) {
+        let bytes = match base64_decode(data) {
+            Some(b) => b,
+            None => return ToolResult::error("failed to decode rendered image"),
+        };
+        image_result_from_bytes(bytes, None, args.get("format").and_then(Value::as_str).unwrap_or("png"), save_to, meta)
+    } else if let Some(file) = file {
+        image_result(&file, None, args.get("format").and_then(Value::as_str).unwrap_or("png"), save_to, meta)
+    } else if let Some(path) = save_to {
+        image_result(Path::new(path), None, args.get("format").and_then(Value::as_str).unwrap_or("png"), Some(path), meta)
+    } else {
+        ToolResult::error("render did not return image data")
+    }
 }
 
 fn screenshot(b: &mut dyn Backend, args: &Value) -> ToolResult {

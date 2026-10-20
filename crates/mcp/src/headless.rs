@@ -157,7 +157,10 @@ impl Backend for Headless {
                             write_image(Path::new(path), &img, 92)?;
                             Ok(json!({"path": path, "width": img.width, "height": img.height}))
                         }
-                        None => Ok(json!({"width": img.width, "height": img.height})),
+                        None => {
+                            let bytes = encode_image("png", &img, 92)?;
+                            Ok(json!({"width": img.width, "height": img.height, "data": crate::base64::base64_encode(&bytes)}))
+                        }
                     }
                 }
                 "app.export" => self.export(&p),

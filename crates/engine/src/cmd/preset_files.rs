@@ -24,6 +24,10 @@ fn import(s: &mut Session, p: &Value) -> Result<Value> {
     let mut effects = Vec::new();
     let mut effect_failed = Vec::new();
     for top in &paths {
+        if let Err(e) = crate::file_access::check_read(top) {
+            failed.push(json!([top, e]));
+            continue;
+        }
         let from_dir = std::path::Path::new(top).is_dir();
         for f in expand_preset_paths(std::slice::from_ref(top)) {
             // presets in a folder go to a group named after it (unless the file names its own)
@@ -31,7 +35,7 @@ fn import(s: &mut Session, p: &Value) -> Result<Value> {
             let base = std::path::Path::new(top).parent().unwrap_or(std::path::Path::new(""));
             let rel = std::path::Path::new(&f).parent().and_then(|d| d.strip_prefix(base).ok()).map(|d| d.to_string_lossy().to_string());
             let rel = rel.filter(|_| from_dir);
-            let bytes = match crate::file_access::check_read(&f).map_err(|e| e.to_string()).and_then(|_| mef::read_capped(&f)) {
+            let bytes = match mef::read_capped(&f) {
                 Ok(b) => b,
                 Err(e) => {
                     failed.push(json!([f, e]));

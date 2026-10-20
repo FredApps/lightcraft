@@ -36,14 +36,14 @@ as a pre-dispatch refusal (for example, too many control connections); the next 
 For autonomous environments and sandboxed agent workflows, `lightcraft-cli mcp` can confine all file operations to designated directories:
 
 - `--automation-read-root DIR`: Confines all file reads (imports, probes, previews, presets) to `DIR`.
-- `--automation-write-root DIR`: Confines all file writes (exports, renders, sidecars, library files) to `DIR`.
+- `--automation-write-root DIR`: Confines all file writes (exports, renders, sidecars) to `DIR`.
 
 #### Confinement semantics & rules:
 - **In-process headless only**: Confinement applies strictly to the in-process headless server. Combining `--automation-read-root` or `--automation-write-root` with `--connect` is immediately rejected with an error because a running external desktop app cannot be confined by CLI arguments.
 - **Strict canonicalization**: Both roots and target paths are canonicalized with all symbolic links resolved.
 - **Traversal & link escape refusal**: Path traversal attempts (e.g. `..`), symlinks pointing outside roots, and dangling symlinks are refused before any filesystem operation begins. Denied writes never create parent directories or truncate existing files.
 - **Case-insensitivity & device names**: Windows path matching is case-insensitive, and reserved DOS device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`) are unconditionally blocked.
-- **Backward compatibility**: Specifying neither root preserves 100% unconfined default behavior. Specifying one root confines only operations of that direction (e.g. `--automation-read-root` alone allows reading only from that directory, but denies writes unless `--automation-write-root` is also provided).
+- **Root permissions**: Specifying neither root preserves 100% unconfined default behavior. When automation roots are configured, read access is permitted within either the read root or write root (allowing tools to read back exported files), while write access is strictly confined to the write root. A read-only root denies all writes.
 - **Threat model limits**: Confinement enforces path boundary invariants against accidental or adversarial paths emitted by LLM tool calls. It does not replace OS-level kernel sandbox primitives against external processes racing or modifying folder trees concurrently.
 - **Operator configuration vs. agent file access**: Startup flags such as `--library DIR` designate operator-chosen configuration rather than LLM-directed paths. The server's internal library catalog storage is operated under unconfined authority, while all agent-driven operations (reads, imports, exports, sidecars, browsing) are strictly confined to the configured automation roots.
 

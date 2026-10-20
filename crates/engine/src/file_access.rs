@@ -10,7 +10,7 @@
 //!   is a link that leads nowhere).
 //! - The result must lie inside the root, compared by whole components (`/work2` isn't inside
 //!   `/work`), without regard to case on Windows.
-//! - Read and write access are separate: a root given alone grants only its own kind of access.
+//! - Read access is permitted inside either root; write access only inside the write root.
 //!
 //! Roots are in force on a thread inside [`confine`], and in the whole process after
 //! [`confine_process`] (`lightcraft-cli mcp`), except inside [`unconfined`]. Without roots
@@ -86,24 +86,26 @@ impl AutomationRoots {
     /// May the file or folder at `path` be read (or written)? `Err` says why not.
     pub fn check(&self, path: impl AsRef<Path>, access: Access) -> Result<(), String> {
         let path = path.as_ref();
-        let root = match access {
-            Access::Read => self.read.as_ref(),
-            Access::Write => self.write.as_ref(),
+        let roots: Vec<&Root> = match access {
+            Access::Read => self.read.iter().chain(self.write.iter()).collect(),
+            Access::Write => self.write.iter().collect(),
         };
-        let Some(Root { resolved: folder, shown }) = root else {
+        if roots.is_empty() {
             return match access {
                 Access::Read => Err(format!("automation filesystem access is not granted: read authority is absent: {}", path.display())),
                 Access::Write => Err(format!("automation filesystem access is not granted: write authority is absent: {}", path.display())),
             };
-        };
-        if inside(&resolve(path)?, folder) {
+        }
+        let resolved = resolve(path)?;
+        if roots.iter().any(|r| inside(&resolved, &r.resolved)) {
             return Ok(());
         }
-        let root = shown.display();
-        match access {
-            Access::Read => Err(format!("automation path rejected: outside the read root {root}: {}", path.display())),
-            Access::Write => Err(format!("automation path rejected: outside the write root {root}: {}", path.display())),
-        }
+        let shown: Vec<String> = roots.iter().map(|r| r.shown.display().to_string()).collect();
+        let kind = match access {
+            Access::Read => "read",
+            Access::Write => "write",
+        };
+        Err(format!("automation path rejected: outside the {kind} root {}: {}", shown.join(", "), path.display()))
     }
 }
 
@@ -296,10 +298,10 @@ mod tests {
         assert_eq!(roots.check(s(base.join("out/new/deeper/x.png")), Access::Write), Ok(()), "and by their nearest folder");
         let e = roots.check(s(base.join("outside/secret.jpg")), Access::Read).unwrap_err();
         assert!(e.starts_with("automation path rejected: outside the read root"), "{e}");
-        // Read and write access are separate.
+        // Read and write access.
         let e = roots.check(s(base.join("in/a.jpg")), Access::Write).unwrap_err();
         assert!(e.contains("outside the write root"), "{e}");
-        assert!(roots.check(s(base.join("out/x.png")), Access::Read).unwrap_err().contains("outside the read root"));
+        assert_eq!(roots.check(s(base.join("out/x.png")), Access::Read), Ok(()), "reads are permitted under write root");
         let _ = std::fs::remove_dir_all(base);
     }
 
