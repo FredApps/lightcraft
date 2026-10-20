@@ -102,6 +102,7 @@ impl LightcraftApp {
             merge: merge::MergeState::default(),
             import: None,
             scan: None,
+            review_listed: None,
             sync: None,
             sync_owns_changes: false,
             sync_run: None,
