@@ -52,7 +52,11 @@ jobs:
       run:
         shell: bash
     steps:
+      # Build scripts and tests of the pull request run in the `cargo xtask ci` step, and no step
+      # pushes or fetches through this checkout, so its token must not stay on disk.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Check out craft-fonts (pinned)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
