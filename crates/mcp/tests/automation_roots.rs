@@ -439,6 +439,37 @@ fn lightroom_commands_refused_outside_read_root() {
 }
 
 #[test]
+fn lightroom_wal_symlink_outside_read_root_is_refused() {
+    let (mut server, base) = confined("lrcat_wal", true, true);
+    let lrcat_in = base.join("in/catalog.lrcat");
+    let wal_in = base.join("in/catalog.lrcat-wal");
+    let outside_secret = base.join("outside/secret.txt");
+    std::fs::write(&outside_secret, b"secret wal data").unwrap();
+    std::fs::write(&lrcat_in, b"SQLite format 3\0").unwrap();
+
+    #[cfg(unix)]
+    let made = std::os::unix::fs::symlink(&outside_secret, &wal_in).is_ok();
+    #[cfg(windows)]
+    let made = std::os::windows::fs::symlink_file(&outside_secret, &wal_in).is_ok();
+
+    if made {
+        refused(
+            &mut server,
+            "run_command",
+            json!({"command": "library.inspectLightroom", "params": {"path": s(&lrcat_in)}}),
+            "outside the read root",
+        );
+        refused(
+            &mut server,
+            "run_command",
+            json!({"command": "library.importLightroom", "params": {"path": s(&lrcat_in)}}),
+            "outside the read root",
+        );
+    }
+    let _ = std::fs::remove_dir_all(base);
+}
+
+#[test]
 fn library_import_preview_refused_outside_read_root() {
     let (mut server, base) = confined("preview", true, true);
     let outside_path = s(&base.join("outside/secret.png"));
