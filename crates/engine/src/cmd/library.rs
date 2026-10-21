@@ -1502,7 +1502,7 @@ pub fn specs() -> Vec<CommandSpec> {
             let wal_path = std::path::PathBuf::from(format!("{}-wal", catalog_path.display()));
             crate::file_access::check_read(&wal_path).map_err(|e| bad("library.inspectLightroom", e))?;
             let data = crate::lightroom_catalog::read(catalog_path).map_err(|e| bad("library.inspectLightroom",e))?;
-            Ok(json!({"photos":data.photos.len(),"collections":data.collections.iter().filter(|r|r.get("systemOnly").and_then(Value::as_f64).unwrap_or(0.0)==0.0).count(),"missing":data.photos.iter().filter(|p| !std::path::Path::new(&p.path).is_file()).map(|p|&p.path).collect::<Vec<_>>(),"warnings":data.warnings}))
+            Ok(json!({"photos":data.photos.len(),"collections":data.collections.iter().filter(|r|r.get("systemOnly").and_then(Value::as_f64).unwrap_or(0.0)==0.0).count(),"missing":data.photos.iter().filter(|p| !p.original_is_file()).map(|p|&p.path).collect::<Vec<_>>(),"warnings":data.warnings}))
         }),
         cmd!(
             "library.importLightroom",
