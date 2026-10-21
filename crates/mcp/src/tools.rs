@@ -678,6 +678,18 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
                     return ToolResult::error(e);
                 }
             }
+            if let Some(dest) = args.get("destination").and_then(Value::as_str).filter(|d| !d.trim().is_empty()) {
+                if let Err(e) = lightcraft_engine::file_access::check_write(dest) {
+                    return ToolResult::error(e);
+                }
+            }
+            if args.get("mode").and_then(Value::as_str) == Some("move") {
+                for f in &files {
+                    if let Err(e) = lightcraft_engine::file_access::check_write(f) {
+                        return ToolResult::error(e);
+                    }
+                }
+            }
             let mut p = json!({"paths": files});
             for k in ["album", "mode", "destination", "organize", "rename", "onDeleted"] {
                 if let Some(v) = args.get(k).filter(|v| !v.is_null()) {

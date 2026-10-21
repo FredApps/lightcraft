@@ -373,6 +373,7 @@ pub fn read(path: &Path) -> Result<CatalogImport, String> {
 }
 
 pub fn read_with_progress(path: &Path, cancel: &AtomicBool, total: &AtomicUsize, done: &AtomicUsize) -> Result<CatalogImport, String> {
+    crate::file_access::check_read(path)?;
     // 13 catalog tables plus one validation stage; ImportJob adds one unit per original path.
     total.store(14, Ordering::Relaxed);
     done.store(0, Ordering::Relaxed);
@@ -642,6 +643,7 @@ fn strip_xmp_sentinels(value: &mut Value) {
 /// Import into the current library. Existing edited records are preserved unless explicitly
 /// requested; missing originals remain catalogued for later relinking. The source catalog is read-only.
 pub fn import(s: &mut crate::Session, path: &Path, update_existing: bool) -> crate::Result<Value> {
+    crate::file_access::check_read(path).map_err(error)?;
     let mut job = crate::lightroom_job::LightroomJob::new(s, path.to_path_buf(), update_existing)?;
     let cancel = AtomicBool::new(false);
     let prepared = job.prepare(&cancel)?;

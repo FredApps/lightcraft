@@ -263,3 +263,192 @@ fn mask_import_effects_symlink_directory_outside_read_root_is_not_traversed() {
     }
     let _ = std::fs::remove_dir_all(base);
 }
+
+#[test]
+fn folder_create_refused_outside_write_root() {
+    let (mut server, base) = confined("folder_create", true, true);
+    let in_dir = s(&base.join("in"));
+    let outside_dir = s(&base.join("outside"));
+    let out_dir = s(&base.join("out"));
+
+    // Attempting to create a folder in the read root is refused
+    refused(
+        &mut server,
+        "run_command",
+        json!({"command": "folder.create", "params": {"parent": in_dir, "name": "subfolder"}}),
+        "outside the write root",
+    );
+    assert!(!base.join("in/subfolder").exists(), "Denied folder.create must not create folder in read root");
+
+    // Attempting to create a folder in an outside directory is refused
+    refused(
+        &mut server,
+        "run_command",
+        json!({"command": "folder.create", "params": {"parent": outside_dir, "name": "subfolder"}}),
+        "outside the write root",
+    );
+    assert!(!base.join("outside/subfolder").exists(), "Denied folder.create must not create folder outside");
+
+    // Creating folder inside write root succeeds
+    ok(
+        &mut server,
+        "run_command",
+        json!({"command": "folder.create", "params": {"parent": out_dir, "name": "valid_subfolder"}}),
+    );
+    assert!(base.join("out/valid_subfolder").exists(), "Valid folder.create inside write root must succeed");
+
+    let _ = std::fs::remove_dir_all(base);
+}
+
+#[test]
+fn folder_rename_and_move_refused_outside_write_root() {
+    let (mut server, base) = confined("folder_ops", true, true);
+    std::fs::create_dir_all(base.join("in/my_folder")).unwrap();
+    std::fs::create_dir_all(base.join("out/my_folder")).unwrap();
+
+    let in_folder = s(&base.join("in/my_folder"));
+    let out_folder = s(&base.join("out/my_folder"));
+    let in_dir = s(&base.join("in"));
+    let out_dir = s(&base.join("out"));
+
+    // Renaming folder in read root is refused
+    refused(
+        &mut server,
+        "run_command",
+        json!({"command": "folder.rename", "params": {"path": in_folder, "name": "renamed_folder"}}),
+        "outside the write root",
+    );
+    assert!(base.join("in/my_folder").exists(), "Folder in read root must remain unmodified");
+    assert!(!base.join("in/renamed_folder").exists(), "Denied folder rename must not create new folder");
+
+    // Moving folder from read root into write root is refused (source cannot be modified)
+    refused(
+        &mut server,
+        "run_command",
+        json!({"command": "folder.move", "params": {"path": in_folder, "into": out_dir}}),
+        "outside the write root",
+    );
+    assert!(base.join("in/my_folder").exists(), "Denied folder move must keep source intact");
+
+    // Moving folder from write root into read root is refused (destination cannot be outside write root)
+    refused(
+        &mut server,
+        "run_command",
+        json!({"command": "folder.move", "params": {"path": out_folder, "into": in_dir}}),
+        "outside the write root",
+    );
+    assert!(base.join("out/my_folder").exists(), "Folder in write root must remain in place");
+
+    let _ = std::fs::remove_dir_all(base);
+}
+
+#[test]
+fn photo_move_to_folder_refused_outside_write_root() {
+    let (mut server, base) = confined("move_photo", true, true);
+    let valid_path = s(&base.join("in/photo.png"));
+    let (error, text, reply) = call(&mut server, "import", json!({"paths": [valid_path]}));
+    assert!(!error, "import {valid_path}: {text}");
+    let id = reply["result"]["structuredContent"]["imported"][0].as_u64().unwrap();
+
+    // Target folder in read root or outside is refused
+    let in_dir = s(&base.join("in"));
+    let outside_dir = s(&base.join("outside"));
+
+    refused(
+        &mut server,
+        "run_command",
+        json!({"command": "photo.moveToFolder", "params": {"folder": outside_dir, "ids": [id]}}),
+        "outside the write root",
+    );
+    assert!(base.join("in/photo.png").exists(), "Photo source must not move");
+
+    refused(
+        &mut server,
+        "run_command",
+        json!({"command": "photo.moveToFolder", "params": {"folder": in_dir, "ids": [id]}}),
+        "outside the write root",
+    );
+    assert!(base.join("in/photo.png").exists(), "Photo source must not move");
+
+    let _ = std::fs::remove_dir_all(base);
+}
+
+#[test]
+fn photo_rename_refused_outside_write_root() {
+    let (mut server, base) = confined("photo_rename", true, true);
+    let valid_path = s(&base.join("in/photo.png"));
+    let (error, text, reply) = call(&mut server, "import", json!({"paths": [valid_path]}));
+    assert!(!error, "import {valid_path}: {text}");
+    let id = reply["result"]["structuredContent"]["imported"][0].as_u64().unwrap();
+
+    // Photo is in `in/photo.png` (read root, not write root)
+    // Renaming it on disk requires write authority on `in/photo.png` and `in/renamed_photo.png`
+    refused(
+        &mut server,
+        "run_command",
+        json!({"command": "photo.rename", "params": {"template": "New_{name}", "ids": [id]}}),
+        "outside the write root",
+    );
+    assert!(base.join("in/photo.png").exists(), "Photo must not be renamed on disk");
+    assert!(!base.join("in/New_photo.png").exists(), "New photo path must not be created");
+
+    let _ = std::fs::remove_dir_all(base);
+}
+
+#[test]
+fn import_mode_move_refused_without_source_write_authority() {
+    let (mut server, base) = confined("import_move", true, true);
+    let photo = base.join("in/photo.png");
+    let valid_path = s(&photo);
+    let out_dir = s(&base.join("out"));
+
+    // Attempting to import with mode=move from read root (without write authority on source) is refused
+    refused(
+        &mut server,
+        "import",
+        json!({"paths": [valid_path], "mode": "move", "destination": out_dir}),
+        "outside the write root",
+    );
+    assert!(photo.exists(), "Source photo in read root must not be removed by move import");
+    assert!(base.join("in/photo.png.xmp").exists(), "Sidecar in read root must not be removed by move import");
+
+    let _ = std::fs::remove_dir_all(base);
+}
+
+#[test]
+fn lightroom_commands_refused_outside_read_root() {
+    let (mut server, base) = confined("lrcat", true, true);
+    let lrcat_outside = s(&base.join("outside/catalog.lrcat"));
+    std::fs::write(base.join("outside/catalog.lrcat"), b"not a real catalog").unwrap();
+
+    refused(
+        &mut server,
+        "run_command",
+        json!({"command": "library.inspectLightroom", "params": {"path": lrcat_outside}}),
+        "outside the read root",
+    );
+
+    refused(
+        &mut server,
+        "run_command",
+        json!({"command": "library.importLightroom", "params": {"path": lrcat_outside}}),
+        "outside the read root",
+    );
+
+    let _ = std::fs::remove_dir_all(base);
+}
+
+#[test]
+fn library_import_preview_refused_outside_read_root() {
+    let (mut server, base) = confined("preview", true, true);
+    let outside_path = s(&base.join("outside/secret.png"));
+
+    refused(
+        &mut server,
+        "run_command",
+        json!({"command": "library.importPreview", "params": {"paths": [outside_path]}}),
+        "outside the read root",
+    );
+
+    let _ = std::fs::remove_dir_all(base);
+}

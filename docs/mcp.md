@@ -47,6 +47,29 @@ For autonomous environments and sandboxed agent workflows, `lightcraft-cli mcp` 
 - **Threat model limits**: Confinement enforces path boundary invariants against accidental or adversarial paths emitted by LLM tool calls. It does not replace OS-level kernel sandbox primitives against external processes racing or modifying folder trees concurrently.
 - **Operator configuration vs. agent file access**: Startup flags such as `--library DIR` designate operator-chosen configuration rather than LLM-directed paths. The server's internal library catalog storage is operated under unconfined authority, while all agent-driven operations (reads, imports, exports, sidecars, browsing) are strictly confined to the configured automation roots.
 
+#### Covered commands & authority enforcement points
+
+Confinement is applied in depth across the filesystem abstraction layer (`RealFs`, `folder_on_disk`), engine command dispatch, and MCP protocol routing:
+
+| Operation / Tool | Command / Subsystem | Authority Required | Enforcement Point |
+|---|---|---|---|
+| `import` | `library.import`, `expand_paths` | Read (Write for Move source & destination) | `crates/mcp/src/tools.rs`, `cmd/library.rs`, `import.rs`, `import_move.rs` |
+| Import preview | `library.importPreview` | Read | `crates/engine/src/cmd/library.rs` |
+| Folder browsing | `library.browse` | Read | `crates/engine/src/cmd/browse.rs` |
+| Create folder | `folder.create`, `folder_on_disk` | Write | `crates/engine/src/cmd/browse.rs` |
+| Rename / Move folder | `folder.rename`, `folder.move`, `move_folder` | Write (both source and destination) | `crates/engine/src/cmd/browse.rs` |
+| Move photo to folder | `photo.moveToFolder` | Write (both source and destination) | `crates/engine/src/cmd/browse.rs`, `rename.rs` |
+| Batch rename photos | `photo.rename`, `apply_file_plans` | Write (both source and destination) | `crates/engine/src/cmd/manage.rs`, `rename.rs` (`RealFs`) |
+| Low-level file moves / copies / deletes | `RealFs` (`MoveFs`) | Read for source copy; Write for target & remove | `crates/engine/src/rename.rs` (`RealFs`) |
+| Original & sidecar reads | `files.rs`, `sidecar.rs`, `read_packet` | Read | `crates/engine/src/files.rs`, `crates/engine/src/sidecar.rs` |
+| Sidecar writes | `photo.saveMetadataToFile`, `sidecar.rs` | Write | `crates/engine/src/sidecar.rs` (`save_sidecar_with`) |
+| Export photo | `app.export`, `export.rs` | Write | `crates/engine/src/export.rs` (`write_with`) |
+| Render to disk | `ui.render` / `render_photo` | Write (in-memory if no explicit path) | `crates/mcp/src/headless.rs`, `crates/engine/src/export.rs` |
+| Preset & LUT import | `preset.import`, `lut_profiles.rs` | Read | `crates/engine/src/cmd/preset_files.rs`, `lut_profiles.rs` |
+| Mask effect import | `mask.importEffects` | Read (top-level and per-directory) | `crates/engine/src/cmd/mask_effect_files.rs` |
+| Keywords import / export | `keywords.import`, `keywords.export` | Read / Write | `crates/engine/src/cmd/keywords.rs` |
+| Lightroom Classic interop | `library.inspectLightroom`, `library.importLightroom` | Read | `crates/engine/src/cmd/library.rs`, `lightroom_catalog.rs` |
+
 Logs go to stderr; stdout carries only protocol messages.
 
 ## Wiring it into a client

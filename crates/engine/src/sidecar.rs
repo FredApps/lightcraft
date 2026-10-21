@@ -501,14 +501,17 @@ fn file_path(p: &Photo) -> Option<&str> {
 /// The XMP packet that describes a photo on disk: its sidecar, else (raw/DNG) the embedded XMP.
 pub fn read_packet(original: &str, kind: MediaKind, naming: SidecarNaming) -> Option<(String, PathBuf)> {
     if let Some(sc) = find_sidecar(original, naming)
+        && crate::file_access::check_read(&sc).is_ok()
         && let Ok(s) = std::fs::read_to_string(&sc)
     {
         return Some((s, sc));
     }
     if kind == MediaKind::Raw {
-        let bytes = std::fs::read(original).ok()?;
-        let x = lightcraft_meta::embedded(&bytes).xmp?;
-        return Some((x, PathBuf::from(original)));
+        if crate::file_access::check_read(original).is_ok() {
+            let bytes = std::fs::read(original).ok()?;
+            let x = lightcraft_meta::embedded(&bytes).xmp?;
+            return Some((x, PathBuf::from(original)));
+        }
     }
     None
 }
