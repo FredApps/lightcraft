@@ -1023,7 +1023,9 @@ impl Rule {
             "captureDate" => date_op(op, p.captured.as_deref(), value),
             "importDate" => date_op(op, Some(&p.imported), value),
             "editDate" => date_op(op, p.edited.as_deref(), value),
-            "shutterSpeed" => num_op(op, m.shutter_seconds(), &shutter_value(value)),
+            // (the shown shutter text, not the exact time kept for export: a rule matches the value the
+            // photo shows, `1/3` or `0.3571`, at every op, including `is` and the edges of a range)
+            "shutterSpeed" => num_op(op, crate::parse_shutter_seconds(&m.shutter), &shutter_value(value)),
             "iso" => num_op(op, m.iso.map(|v| v as f64), value),
             "aperture" => num_op(op, m.aperture.map(f32_as_decimal), value),
             "focalLength" => num_op(op, m.focal_mm.map(f32_as_decimal), value),
@@ -1360,6 +1362,26 @@ mod tests {
         p.meta.shutter = "2\"".into();
         assert!(m(&p, "gte", json!("1")) && m(&p, "is", json!(2)));
         assert_eq!(field_group("shutterSpeed"), Some("Camera Info"));
+    }
+
+    /// A photo whose exact exposure time is kept beside its shown shutter text matches the value it
+    /// shows: 1/2.8 s shows `0.3571` and is "is 0.3571"; a camera's 3333/10000 s shows `1/3` and is
+    /// "is 1/3" and inside "≥ 1/3", even though neither exact time equals the shown one.
+    #[test]
+    fn shutter_speed_rules_match_the_shown_value() {
+        let cat = Catalog::new();
+        let mut p = photo(1);
+        let m = |p: &Photo, op: &str, value: serde_json::Value| {
+            rs(json!({"rules": [{"field": "shutterSpeed", "op": op, "value": value}]})).matches(p, &cat)
+        };
+        p.meta.exposure_time = Some(1.0 / 2.8);
+        p.meta.shutter = "0.3571".into();
+        assert!(m(&p, "is", json!("0.3571")) && !m(&p, "isNot", json!("0.3571")), "1/2.8 s is the 0.3571 it shows");
+        assert!(m(&p, "lte", json!("0.3571")) && m(&p, "gte", json!("0.3571")));
+        p.meta.exposure_time = Some(3333.0 / 10000.0);
+        p.meta.shutter = "1/3".into();
+        assert!(m(&p, "is", json!("1/3")) && !m(&p, "isNot", json!("1/3")), "3333/10000 s is the 1/3 it shows");
+        assert!(m(&p, "gte", json!("1/3")) && m(&p, "lte", json!("1/3")) && !m(&p, "lt", json!("1/3")));
     }
 
     #[test]
