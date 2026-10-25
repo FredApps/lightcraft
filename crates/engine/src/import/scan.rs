@@ -1,4 +1,4 @@
-use super::files::{expand, probe_all};
+use super::files::{expand_knowing, probe_all};
 use super::types::ImportCandidate;
 use super::{HashMap, ListedFolders, Path, PathBuf, PhotoId, ProbeInfo, Session, Source};
 
