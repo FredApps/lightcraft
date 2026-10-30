@@ -483,3 +483,139 @@ fn library_import_preview_refused_outside_read_root() {
 
     let _ = std::fs::remove_dir_all(base);
 }
+
+fn confined_with_library(tag: &str, read: bool, write: bool) -> (Server, PathBuf) {
+    let base = std::env::temp_dir().join(format!("lc-mcp-roots-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    for d in ["in", "out", "outside", "lib"] {
+        std::fs::create_dir_all(base.join(d)).unwrap();
+    }
+    create_test_image(&base.join("in/photo.png"), "Inside photo");
+    create_test_image(&base.join("outside/secret.png"), SECRET);
+
+    let (in_dir, out_dir) = (base.join("in"), base.join("out"));
+    let roots = AutomationRoots::new(read.then_some(in_dir.as_path()), write.then_some(out_dir.as_path())).unwrap();
+    let mut session = Session::new().with_fs().with_default_denoise_models().with_system_clock().with_default_face_models();
+    session.open_library(&base.join("lib"), false).unwrap();
+    let headless = Headless::new(session.with_default_sam3_model().with_default_slide_templates()).with_automation_roots(roots);
+    let server = Server::new(Box::new(headless));
+    (server, base)
+}
+
+#[test]
+fn photo_duplicate_refused_outside_write_root_and_in_read_only_root() {
+    // 1. With write root = out/, source photo is in in/photo.png (outside write root).
+    // Duplicating copies next to original into in/photo-copy.png.
+    let (mut server, base) = confined("dup_write", true, true);
+    let valid_path = s(&base.join("in/photo.png"));
+    let (error, text, reply) = call(&mut server, "import", json!({"paths": [valid_path]}));
+    assert!(!error, "import {valid_path}: {text}");
+    let id = reply["result"]["structuredContent"]["imported"][0].as_u64().unwrap();
+
+    refused(
+        &mut server,
+        "run_command",
+        json!({"command": "photo.duplicate", "params": {"ids": [id]}}),
+        "outside the write root",
+    );
+    assert!(!base.join("in/photo-copy.png").exists(), "Duplicate file must not be created outside write root");
+    let _ = std::fs::remove_dir_all(base);
+
+    // 2. In read-only root: write authority is absent.
+    let (mut server, base) = confined("dup_ro", true, false);
+    let valid_path = s(&base.join("in/photo.png"));
+    let (error, text, reply) = call(&mut server, "import", json!({"paths": [valid_path]}));
+    assert!(!error, "import {valid_path}: {text}");
+    let id = reply["result"]["structuredContent"]["imported"][0].as_u64().unwrap();
+
+    refused(
+        &mut server,
+        "run_command",
+        json!({"command": "photo.duplicate", "params": {"ids": [id]}}),
+        "write authority is absent",
+    );
+    assert!(!base.join("in/photo-copy.png").exists(), "Duplicate file must not be created with read-only root");
+    let _ = std::fs::remove_dir_all(base);
+}
+
+#[test]
+fn photo_convert_to_dng_refused_outside_write_root_and_in_read_only_root() {
+    // 1. With write root = out/, attempting to convert a photo in in/ is refused write into in/.
+    let (mut server, base) = confined("dng_write", true, true);
+    let valid_path = s(&base.join("in/photo.png"));
+    let (error, text, reply) = call(&mut server, "import", json!({"paths": [valid_path]}));
+    assert!(!error, "import {valid_path}: {text}");
+    let id = reply["result"]["structuredContent"]["imported"][0].as_u64().unwrap();
+
+    refused(
+        &mut server,
+        "run_command",
+        json!({"command": "photo.convertToDng", "params": {"ids": [id]}}),
+        "outside the write root",
+    );
+    assert!(!base.join("in/photo.dng").exists(), "DNG must not be created outside write root");
+    let _ = std::fs::remove_dir_all(base);
+
+    // 2. In read-only root: write authority is absent.
+    let (mut server, base) = confined("dng_ro", true, false);
+    let valid_path = s(&base.join("in/photo.png"));
+    let (error, text, reply) = call(&mut server, "import", json!({"paths": [valid_path]}));
+    assert!(!error, "import {valid_path}: {text}");
+    let id = reply["result"]["structuredContent"]["imported"][0].as_u64().unwrap();
+
+    refused(
+        &mut server,
+        "run_command",
+        json!({"command": "photo.convertToDng", "params": {"ids": [id]}}),
+        "write authority is absent",
+    );
+    assert!(!base.join("in/photo.dng").exists(), "DNG must not be created with read-only root");
+    let _ = std::fs::remove_dir_all(base);
+}
+
+#[test]
+fn library_smart_previews_location_refused_outside_write_root_and_in_read_only_root() {
+    // 1. With write root = out/, moving or creating smart previews outside write root is refused.
+    let (mut server, base) = confined_with_library("smart_write", true, true);
+    let outside_smart = s(&base.join("outside/smart_previews"));
+
+    refused(
+        &mut server,
+        "run_command",
+        json!({"command": "library.smartPreviewsLocation", "params": {"path": outside_smart}}),
+        "outside the write root",
+    );
+    assert!(!base.join("outside/smart_previews").exists(), "Smart previews dir must not be created outside write root");
+    let _ = std::fs::remove_dir_all(base);
+
+    // 2. In read-only root: write authority is absent.
+    let (mut server, base) = confined_with_library("smart_ro", true, false);
+    let out_smart = s(&base.join("out/smart_previews"));
+
+    refused(
+        &mut server,
+        "run_command",
+        json!({"command": "library.smartPreviewsLocation", "params": {"path": out_smart}}),
+        "write authority is absent",
+    );
+    assert!(!base.join("out/smart_previews").exists(), "Smart previews dir must not be created with read-only root");
+    let _ = std::fs::remove_dir_all(base);
+}
+
+#[test]
+fn photo_relink_refused_outside_read_root() {
+    let (mut server, base) = confined("relink", true, true);
+    let valid_path = s(&base.join("in/photo.png"));
+    let (error, text, reply) = call(&mut server, "import", json!({"paths": [valid_path]}));
+    assert!(!error, "import {valid_path}: {text}");
+    let id = reply["result"]["structuredContent"]["imported"][0].as_u64().unwrap();
+
+    let outside_path = s(&base.join("outside/secret.png"));
+    refused(
+        &mut server,
+        "run_command",
+        json!({"command": "photo.relink", "params": {"id": id, "path": outside_path}}),
+        "outside the read root",
+    );
+    let _ = std::fs::remove_dir_all(base);
+}

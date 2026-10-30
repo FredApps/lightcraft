@@ -71,16 +71,13 @@ impl Headless {
     /// With `path` and no `format`, the format follows the path's extension.
     fn export(&mut self, p: &Value) -> Result<Value, String> {
         use lightcraft_engine::export::{Destination, ExportFormat, ExportOptions, Resize, prepare_batch, run_batch};
-        let p = &self.session.export_params(p)?;
-        let mut opts = ExportOptions::from_params(p).map_err(|e| e.to_string())?;
+        let p = &self.session.export_params_or(p, ExportFormat::Png)?;
+        // PNG for a `path` that names no format; `bitDepth` is checked against the format written
+        let mut opts = ExportOptions::from_params_or(p, ExportFormat::Png).map_err(|e| e.to_string())?;
         if !ExportOptions::has_size_param(p) {
             opts.resize = Some(Resize::long_edge(3000));
         }
         let exact = p.get("path").and_then(Value::as_str);
-        if let (Some(path), None) = (exact, p.get("format")) {
-            let ext = Path::new(path).extension().map(|e| e.to_string_lossy().to_string()).unwrap_or_default();
-            opts.format = ExportFormat::parse(&ext).unwrap_or(ExportFormat::Png);
-        }
         let ids: Vec<_> = match p.get("ids").and_then(Value::as_array) {
             Some(a) => a.iter().filter_map(|v| serde_json::from_value(v.clone()).ok()).collect(),
             // like the desktop app: the selection (in grid order), else the given / active photo
@@ -232,6 +229,28 @@ pub fn write_image(path: &Path, img: &Rgba8, quality: u8) -> Result<(), String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn folder_discovery_matches_engine_extensions() {
+        let dir = std::env::temp_dir().join(format!("lc-mcp-discovery-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let nested = dir.join("trip/day2");
+        std::fs::create_dir_all(&nested).unwrap();
+        let mut expected = Vec::new();
+        for ext in lightcraft_engine::import::EXTENSIONS {
+            for (folder, name) in [(&dir, format!("lower.{ext}")), (&nested, format!("upper.{}", ext.to_ascii_uppercase()))] {
+                let path = folder.join(name);
+                std::fs::write(&path, b"discovery only, not a decoded photo").unwrap();
+                expected.push(path.to_string_lossy().into_owned());
+            }
+        }
+        std::fs::write(nested.join("notes.txt"), b"not a photo").unwrap();
+        let mut found = expand_paths(&[dir.to_string_lossy().into_owned()]);
+        expected.sort();
+        found.sort();
+        assert_eq!(found, expected);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     /// Headless sessions look for the SAM 3 model where the desktop app does, and `segment.model.status` reports it (issue #619).
     #[test]
