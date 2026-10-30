@@ -91,6 +91,8 @@ pub struct Tex {
     pub ms: f64,
     /// Set for stand-ins: where the image came from.
     pub quick: Option<QuickSource>,
+    /// These pixels are a native-resolution photo render, not a stand-in or a reduced view.
+    pub full_res: bool,
     /// CPU copy of the pixels (only with [`Renderer::keep_pixels`]; for headless screenshots).
     pub pixels: Option<std::sync::Arc<egui::ColorImage>>,
 }
@@ -112,6 +114,55 @@ struct Finished {
     look: Option<(u64, bool)>,
     result: RenderResult,
     color: Option<Arc<egui::ColorImage>>,
+    full_res: bool,
+}
+
+/// Sampling inputs travel with the job, including late drafts and offloaded renders.
+struct PhotoSampling {
+    settings: Arc<lightcraft_develop::DevelopSettings>,
+    request: lightcraft_pipeline::RenderRequest,
+    info: lightcraft_pipeline::SourceInfo,
+    source: Option<(usize, usize, bool)>,
+    photo: bool,
+}
+
+impl PhotoSampling {
+    fn new(job: &RenderJob) -> Self {
+        let source = match &job.source {
+            lightcraft_engine::media::SourceRef::Loaded(s) => Some((s.image.width, s.image.height, s.from_proxy || s.reduced)),
+            _ => None,
+        };
+        let info = match &job.source {
+            lightcraft_engine::media::SourceRef::Loaded(s) => s.info.clone().unwrap_or_else(|| job.info.clone()),
+            _ => job.info.clone(),
+        };
+        Self { settings: job.settings.clone(), request: job.request, info, source, photo: job.slide.is_none() && job.preview_cut.is_none() }
+    }
+
+    fn full_res(&self, r: &RenderResult) -> bool {
+        if !self.photo || r.quick.is_some() || r.level != lightcraft_engine::SourceLevel::Full {
+            return false;
+        }
+        let source = r.loaded.as_ref();
+        let Some((w, h, proxy)) = source.map(|s| (s.image.width, s.image.height, s.from_proxy || s.reduced)).or(self.source) else { return false };
+        if proxy || w == 0 || h == 0 {
+            return false;
+        }
+        let info = source.and_then(|s| s.info.as_ref()).unwrap_or(&self.info);
+        if info.native_long.is_some_and(|n| n > w.max(h)) {
+            return false;
+        }
+        let frame = lightcraft_pipeline::geometry::Frame::with_lens(w, h, &self.settings, self.request.apply_crop, info.lens.as_ref());
+        let (fw, fh) = frame.fit(self.request.max_w, self.request.max_h);
+        let (nw, nh) = frame.native_size();
+        let expected = self.request.window.map_or((fw, fh), |win| {
+            let win = win.clamped(fw, fh);
+            (win.w, win.h)
+        });
+        (fw as f64 - nw).abs() <= 0.5
+            && (fh as f64 - nh).abs() <= 0.5
+            && r.rendered.as_ref().is_ok_and(|x| (x.image.width, x.image.height) == expected)
+    }
 }
 
 /// Immutable identity captured when a request is submitted, not when its result is collected.
@@ -203,7 +254,7 @@ pub const VARIANT_TEXTURES: usize = 96;
 pub const MAX_VARIANT_TEXTURES: usize = 800;
 /// Priority of variant thumbnail jobs: below on-screen grid thumbnails and the loupe.
 const VARIANT_PRIORITY: u32 = 6;
-/// Photo textures: shrinking blends (thumbnails, Fit), magnifying past 100 % shows each pixel as a block, so zooming in
+/// Native-resolution photo textures: shrinking blends, magnifying past 100 % shows each pixel as a block, so zooming in
 /// shows what the file holds instead of a bilinear blur (#2643).
 const PHOTO_TEXTURE: egui::TextureOptions = egui::TextureOptions { magnification: egui::TextureFilter::Nearest, ..egui::TextureOptions::LINEAR };
 
@@ -212,7 +263,7 @@ pub struct Renderer {
     pub(crate) thumb_jobs_built: usize,
     requests: HashMap<Slot, Requested>,
     /// Only jobs actually accepted by an offload: queued replacements retain identity in the job.
-    offload_looks: HashMap<u64, (u64, bool)>,
+    offload_looks: HashMap<u64, ((u64, bool), PhotoSampling)>,
     #[cfg(test)]
     failure_messages: Vec<String>,
     /// Request id of the pixels each interactive view (loupe, before, hover) shows: a draft that
@@ -531,7 +582,7 @@ impl Renderer {
             lightcraft_engine::display::present(&mut r, d);
         }
         let color = r.rendered.as_ref().ok().map(|x| Arc::new(color_image(&x.image)));
-        Finished { look: None, result: r, color }
+        Finished { look: None, result: r, color, full_res: false }
     }
 
     fn request_needed(&self, slot: Slot, key: u64, priority: u32) -> bool {
@@ -602,8 +653,11 @@ impl Renderer {
             priority,
             Box::new(move || {
                 let look = Some((geometry_look(&job.settings), job.request.apply_crop));
+                let sampling = PhotoSampling::new(&job);
                 let run = || if background { lightcraft_engine::memory::in_background(|| job.run()) } else { job.run() };
-                Finished { look, ..Self::run_for(run, &display) }
+                let mut done = Self::run_for(run, &display);
+                done.full_res = sampling.full_res(&done.result);
+                Finished { look, ..done }
             }),
         );
     }
@@ -682,7 +736,7 @@ impl Renderer {
             slot,
             key,
             priority,
-            Box::new(move || Finished { look: None, result: lightcraft_engine::memory::in_background(|| job.run()), color: None }),
+            Box::new(move || Finished { look: None, result: lightcraft_engine::memory::in_background(|| job.run()), color: None, full_res: false }),
         );
     }
 
@@ -753,7 +807,7 @@ impl Renderer {
         let Some(off) = self.offload.as_mut() else { return };
         while let Some(i) = self.queue.iter().enumerate().max_by_key(|(_, q)| (q.priority, q.seq)).map(|(i, _)| i) {
             let q = self.queue.swap_remove(i);
-            let identity = (q.job.request_id, (geometry_look(&q.job.settings), q.job.request.apply_crop));
+            let identity = (q.job.request_id, ((geometry_look(&q.job.settings), q.job.request.apply_crop), PhotoSampling::new(&q.job)));
             if let Some(job) = off.try_start(q.slot, q.job) {
                 self.queue.push(Queued { job, ..q });
                 break;
@@ -950,17 +1004,26 @@ impl Renderer {
     fn collect(&mut self, ctx: &egui::Context, session: &mut Session, inline_ms: f64) -> bool {
         let mut finished = Vec::new();
         while let Some(done) = self.pool.try_recv() {
-            finished.push((done.slot, done.result.result, done.result.color, done.result.look, if done.ms > 0.0 { done.ms } else { inline_ms }));
+            finished.push((
+                done.slot,
+                done.result.result,
+                done.result.color,
+                done.result.look,
+                done.result.full_res,
+                if done.ms > 0.0 { done.ms } else { inline_ms },
+            ));
         }
         if let Some(off) = self.offload.as_mut() {
             finished.extend(off.finished().into_iter().map(|(slot, r, ms)| {
-                let look = self.offload_looks.remove(&r.request_id);
-                (slot, r, None, look, ms)
+                let identity = self.offload_looks.remove(&r.request_id);
+                let full_res = identity.as_ref().is_some_and(|(_, sampling)| sampling.full_res(&r));
+                let look = identity.map(|(look, _)| look);
+                (slot, r, None, look, full_res, ms)
             }));
         }
         self.dispatch();
         let mut changed = false;
-        for (mut slot, mut r, mut color, completed_look, ms) in finished {
+        for (mut slot, mut r, mut color, completed_look, full_res, ms) in finished {
             self.completed += 1;
             // made for another display profile than the one in use: obsolete
             if r.display.is_some_and(|id| Some(id) != self.display_id()) {
@@ -1045,9 +1108,11 @@ impl Renderer {
             let color = color.unwrap_or_else(|| Arc::new(color_image(img)));
             let pixels = self.keep_pixels.then(|| color.clone());
             let name = format!("{slot:?}");
+            let options = if full_res { PHOTO_TEXTURE } else { egui::TextureOptions::LINEAR };
             match self.textures.get_mut(&slot) {
                 Some(t) => {
-                    t.tex.set(color, PHOTO_TEXTURE);
+                    t.tex.set(color, options);
+                    t.full_res = full_res;
                     t.pixels = pixels;
                     t.look = look;
                     t.key = r.key;
@@ -1058,7 +1123,7 @@ impl Renderer {
                     t.quick = r.quick;
                 }
                 None => {
-                    let tex = ctx.load_texture(name, color, PHOTO_TEXTURE);
+                    let tex = ctx.load_texture(name, color, options);
                     self.textures.insert(
                         slot,
                         Tex {
@@ -1070,6 +1135,7 @@ impl Renderer {
                             histogram: Some(rendered.histogram),
                             ms,
                             quick: r.quick,
+                            full_res,
                             pixels,
                         },
                     );
@@ -1142,7 +1208,19 @@ impl Renderer {
 
     /// CPU copies of the current textures by id (see [`Self::keep_pixels`]).
     pub fn cpu_textures(&self) -> HashMap<egui::TextureId, crate::softpaint::CpuTexture> {
-        self.textures.values().filter_map(|t| Some((t.tex.id(), crate::softpaint::CpuTexture::linear(t.pixels.clone()?)))).collect()
+        self.textures
+            .values()
+            .filter_map(|t| {
+                Some((
+                    t.tex.id(),
+                    crate::softpaint::CpuTexture {
+                        image: t.pixels.clone()?,
+                        magnification: if t.full_res { PHOTO_TEXTURE.magnification } else { egui::TextureFilter::Linear },
+                        minification: egui::TextureFilter::Linear,
+                    },
+                ))
+            })
+            .collect()
     }
 
     /// Drop the import review thumbnails (a new review, or the dialog closed).
@@ -1216,7 +1294,7 @@ mod stage_budget_tests {
         let tex = ctx.load_texture("window", egui::ColorImage::new([1, 1], vec![egui::Color32::BLACK]), Default::default());
         r.textures.insert(
             Slot::Region,
-            Tex { look: None, key: 1, photo: PhotoId(1), tex, size: [1, 1], histogram: None, ms: 0.0, quick: None, pixels: None },
+            Tex { look: None, key: 1, photo: PhotoId(1), tex, size: [1, 1], histogram: None, ms: 0.0, quick: None, full_res: false, pixels: None },
         );
         let long_ago = std::time::Instant::now().checked_sub(IDLE_TRIM * 2).unwrap();
         r.idle = Some((long_ago, false));

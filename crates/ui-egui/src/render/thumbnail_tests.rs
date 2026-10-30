@@ -205,6 +205,7 @@ fn larger_texture_for_another_key_does_not_count_as_current() {
         histogram: None,
         ms: 0.0,
         quick: None,
+        full_res: false,
         pixels: None,
     };
     let mut r = Renderer::default();
@@ -1204,4 +1205,45 @@ fn undo_to_embedded_thumb_rejects_late_full_render() {
     assert_eq!(quick.quick, Some(QuickSource::Embedded));
     assert_eq!(quick.pixels.as_ref().unwrap().pixels, pixels_a);
     assert!(!app.renderer.is_pending(full_slot));
+}
+
+// Stand-ins and reduced renders stay smooth, even when replacing native pixels in the same slot.
+#[test]
+fn only_native_photo_pixels_use_nearest_magnification() {
+    let (mut app, work, ctx) = fixture();
+    for slot in [Slot::Main, Slot::Before, Slot::Region] {
+        for (edge, window, display_fit, proxy, quick, nearest) in [
+            (8, None, None, false, None, true),
+            (4, None, None, false, None, false),
+            (8, Some(lightcraft_pipeline::PixelWindow { x: 2, y: 2, w: 3, h: 3 }), None, false, None, true),
+            (4, Some(lightcraft_pipeline::PixelWindow { x: 0, y: 0, w: 3, h: 3 }), None, false, None, false),
+            (8, None, Some((4, 4)), false, None, false),
+            (8, None, None, true, None, false),
+            (8, None, None, false, Some(QuickSource::Cached), false),
+        ] {
+            let mut job = app.session.render_job(PhotoId(1), edge, edge, false, true).unwrap();
+            let mut source = lightcraft_engine::media::DecodedSource::new(Arc::new(lightcraft_raster::Rgb32f::new(8, 8)), None);
+            source.from_proxy = proxy;
+            job.source = lightcraft_engine::media::SourceRef::Loaded(Box::new(source));
+            job.level = lightcraft_engine::SourceLevel::Full;
+            job.info = Default::default();
+            job.request.window = window;
+            job.display_fit = display_fit;
+            job.key = lightcraft_preview::next_tick();
+            app.renderer.request(slot, job, 100);
+            let (_, job) = take_job(&work);
+            let mut result = job.run();
+            result.quick = quick;
+            finish(&mut app, &work, &ctx, slot, result);
+            let t = &app.renderer.textures[&slot];
+            assert_eq!(t.full_res, nearest, "{slot:?}, edge {edge}, window {window:?}, display fit {display_fit:?}, proxy {proxy}, quick {quick:?}");
+            let mut delta = ctx.tex_manager().write().take_delta();
+            let options = delta.set.get(&t.tex.id()).and_then(|updates| updates.last()).unwrap().options;
+            delta.clear();
+            assert_eq!(options.magnification, if nearest { egui::TextureFilter::Nearest } else { egui::TextureFilter::Linear });
+            assert_eq!(options.minification, egui::TextureFilter::Linear);
+            let cpu = app.renderer.cpu_textures();
+            assert_eq!(cpu[&t.tex.id()].magnification, options.magnification);
+        }
+    }
 }
