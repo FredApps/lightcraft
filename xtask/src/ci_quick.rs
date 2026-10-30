@@ -33,7 +33,7 @@ const HEIF_PACKAGES: &[&str] = &["lightcraft-codecs", "lightcraft-heif"];
 /// a build script's `rerun-if-changed`): a change to one counts as a change to those packages.
 /// An entry ending in `/` covers the directory. `embedded_files_are_mapped` keeps this complete.
 const EMBEDDED: &[(&str, &[&str])] = &[
-    ("assets/app-icon/", &["lightcraft"]),
+    ("assets/app-icon/", &["lightcraft", "lightcraft-ui-egui"]),
     ("assets/camera-profiles/", &["lightcraft-engine"]),
     ("assets/camera-tone/", &["lightcraft-engine"]),
     ("assets/fonts/", &["lightcraft-engine", "lightcraft-ui-egui"]),
@@ -270,6 +270,12 @@ mod tests {
         assert!(!p.packages.contains("lightcraft-ui-egui"));
         let p = plan(&[ch("assets/ATTRIBUTION.md"), ch("docs/raw-parity.md")], &pkgs(), "b".into());
         assert!(!p.rust(), "only files something compiles in");
+    }
+
+    #[test]
+    fn app_icon_changes_retest_both_hosts_and_the_update_prompt() {
+        let users: Vec<_> = embedders("assets/app-icon/hicolor/128x128/apps/ai.storyteller.lightcraft.png").collect();
+        assert_eq!(users, ["lightcraft", "lightcraft-ui-egui"]);
     }
 
     /// Every `include_str!` / `include_bytes!` of a file outside its package, and every `"../…"`
