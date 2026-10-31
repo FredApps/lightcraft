@@ -93,6 +93,8 @@ pub struct Tex {
     pub quick: Option<QuickSource>,
     /// These pixels are a native-resolution photo render, not a stand-in or a reduced view.
     pub full_res: bool,
+    /// One unchanged texel lets a sampler change avoid uploading the whole image.
+    pub first_pixel: Option<egui::Color32>,
     /// CPU copy of the pixels (only with [`Renderer::keep_pixels`]; for headless screenshots).
     pub pixels: Option<std::sync::Arc<egui::ColorImage>>,
 }
@@ -290,6 +292,8 @@ pub struct Renderer {
     /// Slot → (key, priority) of the request in flight (queued or running).
     pending: HashMap<Slot, (u64, u32)>,
     pub textures: HashMap<Slot, Tex>,
+    /// Each view owns its zoom; automatic Fit/Fill views default to linear.
+    texture_zoom: HashMap<Slot, crate::state::Zoom>,
     /// The last [`Slot::HdrHistogram`] result: (photo, job key, histogram).
     pub live_hdr_histogram: Option<(PhotoId, u64, Histogram)>,
     pub last_main_ms: f64,
@@ -340,8 +344,10 @@ const IDLE_TRIM: std::time::Duration = std::time::Duration::from_secs(3);
 impl Slot {
     /// Only native photo-view renders expose original pixels. Thumbnails and stand-ins stay
     /// linear even when a small original fits their cache entry without losing any pixels.
-    fn texture_options(self, full_res: bool) -> egui::TextureOptions {
+    /// Fit and Fill also stay smooth: only explicit zoom past 100% exposes the pixel grid.
+    fn texture_options(self, full_res: bool, zoom: crate::state::Zoom) -> egui::TextureOptions {
         if full_res
+            && matches!(zoom, crate::state::Zoom::Percent(p) if p > 100.0)
             && matches!(
                 self,
                 Self::Main
@@ -397,6 +403,7 @@ impl Renderer {
             seq: 0,
             pending: HashMap::new(),
             textures: HashMap::new(),
+            texture_zoom: HashMap::new(),
             live_hdr_histogram: None,
             last_main_ms: 0.0,
             completed: 0,
@@ -422,6 +429,37 @@ impl Renderer {
 }
 
 impl Renderer {
+    /// The same choice drives uploads, retained samplers and software copies.
+    fn texture_options(&self, slot: Slot, full_res: bool) -> egui::TextureOptions {
+        slot.texture_options(full_res, self.texture_zoom.get(&slot).copied().unwrap_or_default())
+    }
+
+    /// Automatic Fit views can borrow Main while their own render is pending, but must not
+    /// enlarge its explicit-zoom nearest sampler. Shrinking it is still linear and safe.
+    pub fn main_for_fit(&self, photo: PhotoId, physical_bounds: [f32; 2]) -> Option<&Tex> {
+        self.textures.get(&Slot::Main).filter(|t| {
+            t.photo == photo
+                && (self.texture_options(Slot::Main, t.full_res) == egui::TextureOptions::LINEAR
+                    || physical_bounds[0] <= t.size[0] as f32
+                    || physical_bounds[1] <= t.size[1] as f32)
+        })
+    }
+
+    /// Refresh a view's sampler even while navigation keeps its existing render (SizeHold).
+    /// egui has no sampler-only delta. Rewriting one unchanged texel updates its sampler
+    /// without retaining or re-uploading a potentially large CPU image.
+    pub fn set_texture_zoom(&mut self, slot: Slot, zoom: crate::state::Zoom) {
+        let old = self.texture_zoom.insert(slot, zoom).unwrap_or_default();
+        if let Some(t) = self.textures.get_mut(&slot) {
+            let options = slot.texture_options(t.full_res, zoom);
+            if options != slot.texture_options(t.full_res, old)
+                && let Some(pixel) = t.first_pixel
+            {
+                t.tex.set_partial([0, 0], egui::ColorImage::filled([1, 1], pixel), options);
+            }
+        }
+    }
+
     /// Would asking for this thumbnail again (at `priority`) change nothing?
     pub fn thumb_current(&self, photo: &Arc<lightcraft_catalog::Photo>, bucket: usize, priority: u32) -> bool {
         let Some(&(ref old, size, key, quick, _)) = self.thumb_inputs.get(&photo.id) else { return false };
@@ -1133,11 +1171,13 @@ impl Renderer {
             let color = color.unwrap_or_else(|| Arc::new(color_image(img)));
             let pixels = self.keep_pixels.then(|| color.clone());
             let name = format!("{slot:?}");
-            let options = slot.texture_options(full_res);
+            let options = self.texture_options(slot, full_res);
+            let first_pixel = color.pixels.first().copied();
             match self.textures.get_mut(&slot) {
                 Some(t) => {
                     t.tex.set(color, options);
                     t.full_res = full_res;
+                    t.first_pixel = first_pixel;
                     t.pixels = pixels;
                     t.look = look;
                     t.key = r.key;
@@ -1161,6 +1201,7 @@ impl Renderer {
                             ms,
                             quick: r.quick,
                             full_res,
+                            first_pixel,
                             pixels,
                         },
                     );
@@ -1236,7 +1277,7 @@ impl Renderer {
         self.textures
             .iter()
             .filter_map(|(slot, t)| {
-                let options = slot.texture_options(t.full_res);
+                let options = self.texture_options(*slot, t.full_res);
                 Some((
                     t.tex.id(),
                     crate::softpaint::CpuTexture {
@@ -1320,7 +1361,19 @@ mod stage_budget_tests {
         let tex = ctx.load_texture("window", egui::ColorImage::new([1, 1], vec![egui::Color32::BLACK]), Default::default());
         r.textures.insert(
             Slot::Region,
-            Tex { look: None, key: 1, photo: PhotoId(1), tex, size: [1, 1], histogram: None, ms: 0.0, quick: None, full_res: false, pixels: None },
+            Tex {
+                look: None,
+                key: 1,
+                photo: PhotoId(1),
+                tex,
+                size: [1, 1],
+                histogram: None,
+                ms: 0.0,
+                quick: None,
+                full_res: false,
+                first_pixel: None,
+                pixels: None,
+            },
         );
         let long_ago = std::time::Instant::now().checked_sub(IDLE_TRIM * 2).unwrap();
         r.idle = Some((long_ago, false));

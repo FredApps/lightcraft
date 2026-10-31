@@ -123,6 +123,7 @@ fn micro(points: usize, pending: bool) {
                     ms: 0.0,
                     quick: None,
                     full_res: false,
+                    first_pixel: Some(egui::Color32::GRAY),
                     pixels: None,
                 },
             );

@@ -206,6 +206,7 @@ fn larger_texture_for_another_key_does_not_count_as_current() {
         ms: 0.0,
         quick: None,
         full_res: false,
+        first_pixel: None,
         pixels: None,
     };
     let mut r = Renderer::default();
@@ -1271,6 +1272,7 @@ fn only_native_photo_pixels_use_nearest_magnification() {
                     job.request.window = window;
                     job.display_fit = display_fit;
                     job.key = lightcraft_preview::next_tick();
+                    app.renderer.set_texture_zoom(slot, crate::state::Zoom::Percent(200.0));
                     app.renderer.request(slot, job, 100);
                     let (_, job) = take_job(&work);
                     let mut result = job.run();
@@ -1325,4 +1327,73 @@ fn thumbnail_slots_stay_linear_for_native_small_originals() {
             assert_eq!(cpu[&t.tex.id()].minification, egui::TextureFilter::Linear);
         }
     }
+}
+
+#[test]
+fn native_small_main_stays_linear_in_fit() {
+    let (mut app, work, ctx) = fixture();
+    let mut job = app.session.render_job(PhotoId(1), 512, 512, false, true).unwrap();
+    job.source = lightcraft_engine::media::SourceRef::Loaded(Box::new(lightcraft_engine::media::DecodedSource::new(
+        Arc::new(lightcraft_raster::Rgb32f::new(512, 512)),
+        Some(Default::default()),
+    )));
+    job.level = lightcraft_engine::SourceLevel::Full;
+    job.info = lightcraft_pipeline::SourceInfo { native_long: Some(512), ..Default::default() };
+    app.renderer.request(Slot::Main, job, 100);
+    let (_, job) = take_job(&work);
+    finish(&mut app, &work, &ctx, Slot::Main, job.run());
+    let t = &app.renderer.textures[&Slot::Main];
+    assert!(t.full_res);
+    let mut delta = ctx.tex_manager().write().take_delta();
+    let options = delta.set[&t.tex.id()].last().unwrap().options;
+    delta.clear();
+    assert_eq!(options, egui::TextureOptions::LINEAR, "native small Main in Fit");
+    let id = t.tex.id();
+    let key = t.key;
+    let pixels = t.pixels.clone().unwrap();
+    assert_eq!(app.renderer.cpu_textures()[&id].magnification, egui::TextureFilter::Linear);
+    // No render finishes during these switches: exercise the retained SizeHold texture.
+    for (zoom, filter, changed) in [
+        (crate::state::Zoom::Percent(200.0), egui::TextureFilter::Nearest, true),
+        (crate::state::Zoom::Percent(400.0), egui::TextureFilter::Nearest, false),
+        (crate::state::Zoom::Fit, egui::TextureFilter::Linear, true),
+        (crate::state::Zoom::Fill, egui::TextureFilter::Linear, false),
+        (crate::state::Zoom::Percent(100.0), egui::TextureFilter::Linear, false),
+        (crate::state::Zoom::Percent(200.0), egui::TextureFilter::Nearest, true),
+        (crate::state::Zoom::Percent(50.0), egui::TextureFilter::Linear, true),
+    ] {
+        app.renderer.set_texture_zoom(Slot::Main, zoom);
+        let t = &app.renderer.textures[&Slot::Main];
+        assert_eq!(t.tex.id(), id);
+        assert_eq!(t.tex.size(), [512, 512]);
+        assert_eq!(t.key, key);
+        assert!(Arc::ptr_eq(t.pixels.as_ref().unwrap(), &pixels));
+        let mut delta = ctx.tex_manager().write().take_delta();
+        if changed {
+            let updates = &delta.set[&id];
+            assert_eq!(updates.len(), 1);
+            let update = &updates[0];
+            assert_eq!(update.pos, Some([0, 0]));
+            assert_eq!(update.image.size(), [1, 1], "never re-upload the whole texture");
+            assert_eq!(update.options.magnification, filter);
+            assert_eq!(update.options.minification, egui::TextureFilter::Linear);
+            let egui::ImageData::Color(image) = &update.image;
+            assert_eq!(image.pixels, vec![pixels.pixels[0]], "rewrite the same texel");
+        } else {
+            assert!(delta.set.is_empty(), "unchanged filtering must not upload anything");
+        }
+        delta.clear();
+        let cpu = app.renderer.cpu_textures();
+        assert!(app.renderer.main_for_fit(PhotoId(1), [256.0, 256.0]).is_some(), "minifying Main is safe in either zoom mode");
+        assert_eq!(app.renderer.main_for_fit(PhotoId(1), [768.0, 768.0]).is_some(), filter == egui::TextureFilter::Linear);
+        assert!(app.renderer.main_for_fit(PhotoId(2), [256.0, 256.0]).is_none());
+        assert_eq!(cpu[&id].magnification, filter);
+        assert_eq!(cpu[&id].minification, egui::TextureFilter::Linear);
+    }
+    // The normal GPU path does not retain the full CPU image.
+    app.renderer.textures.get_mut(&Slot::Main).unwrap().pixels = None;
+    app.renderer.set_texture_zoom(Slot::Main, crate::state::Zoom::Percent(200.0));
+    let mut delta = ctx.tex_manager().write().take_delta();
+    assert_eq!(delta.set[&id].last().unwrap().options.magnification, egui::TextureFilter::Nearest);
+    delta.clear();
 }

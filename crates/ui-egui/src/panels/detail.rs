@@ -269,6 +269,9 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
         Vec::new()
     };
     let windows = request_windows(app, &window_ctx, window_views);
+    for slot in [Slot::Main, Slot::Before, Slot::Region, Slot::RegionBefore, Slot::Hover] {
+        app.renderer.set_texture_zoom(slot, app.ui.zoom);
+    }
     let p = ui.painter_at(canvas);
     let draw = |slot: Slot, r: Rect, clip: Rect| draw_slot(app, &p, id, ppp, slot, r, clip);
     // soft proofing: a paper-white surround and the proof's name, as Lightroom shows it
