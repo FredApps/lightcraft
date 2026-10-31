@@ -1247,7 +1247,9 @@ fn only_native_photo_pixels_use_nearest_magnification() {
     let (mut app, work, ctx) = fixture();
     for level in [lightcraft_engine::SourceLevel::Thumb, lightcraft_engine::SourceLevel::Preview, lightcraft_engine::SourceLevel::Full] {
         for native_long in [None, Some(8), Some(16)] {
-            for slot in [Slot::Main, Slot::Before, Slot::Region] {
+            for slot in
+                [Slot::Main, Slot::Before, Slot::Region, Slot::RegionBefore, Slot::Hover, Slot::Compare(0), Slot::CompareRegion(0), Slot::Second]
+            {
                 for (edge, window, display_fit, proxy, quick, nearest) in [
                     (8, None, None, false, None, true),
                     (4, None, None, false, None, false),
@@ -1289,6 +1291,38 @@ fn only_native_photo_pixels_use_nearest_magnification() {
                     assert_eq!(cpu[&t.tex.id()].magnification, options.magnification);
                 }
             }
+        }
+    }
+}
+
+/// A small original can fill its Thumb cache entry without reduction, but a scaled grid or
+/// filmstrip still needs smooth magnification. Check texture creation and same-slot updates,
+/// including the CPU mirrors used by the software painter.
+#[test]
+fn thumbnail_slots_stay_linear_for_native_small_originals() {
+    for slot in [Slot::Thumb(PhotoId(1)), Slot::ThumbQuick(PhotoId(1)), Slot::Preview, Slot::Variant(1), Slot::Import(0), Slot::SlidePreview] {
+        let (mut app, work, ctx) = fixture();
+        for _ in 0..2 {
+            let mut job = app.session.render_job(PhotoId(1), 512, 512, false, true).unwrap();
+            job.source = lightcraft_engine::media::SourceRef::Loaded(Box::new(lightcraft_engine::media::DecodedSource::new(
+                Arc::new(lightcraft_raster::Rgb32f::new(512, 512)),
+                Some(Default::default()),
+            )));
+            job.level = lightcraft_engine::SourceLevel::Thumb;
+            job.info = lightcraft_pipeline::SourceInfo { native_long: Some(512), ..Default::default() };
+            job.key = lightcraft_preview::next_tick();
+            app.renderer.request(slot, job, 100);
+            let (_, job) = take_job(&work);
+            finish(&mut app, &work, &ctx, slot, job.run());
+            let t = &app.renderer.textures[&slot];
+            assert!(t.full_res, "the 512px original really is native in {slot:?}");
+            let mut delta = ctx.tex_manager().write().take_delta();
+            let options = delta.set.get(&t.tex.id()).and_then(|updates| updates.last()).unwrap().options;
+            delta.clear();
+            assert_eq!(options, egui::TextureOptions::LINEAR, "GPU thumbnail {slot:?}");
+            let cpu = app.renderer.cpu_textures();
+            assert_eq!(cpu[&t.tex.id()].magnification, egui::TextureFilter::Linear, "CPU thumbnail {slot:?}");
+            assert_eq!(cpu[&t.tex.id()].minification, egui::TextureFilter::Linear);
         }
     }
 }

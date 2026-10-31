@@ -338,6 +338,28 @@ pub struct Renderer {
 const IDLE_TRIM: std::time::Duration = std::time::Duration::from_secs(3);
 
 impl Slot {
+    /// Only native photo-view renders expose original pixels. Thumbnails and stand-ins stay
+    /// linear even when a small original fits their cache entry without losing any pixels.
+    fn texture_options(self, full_res: bool) -> egui::TextureOptions {
+        if full_res
+            && matches!(
+                self,
+                Self::Main
+                    | Self::Before
+                    | Self::Region
+                    | Self::RegionBefore
+                    | Self::Hover
+                    | Self::Compare(_)
+                    | Self::CompareRegion(_)
+                    | Self::Second
+            )
+        {
+            PHOTO_TEXTURE
+        } else {
+            egui::TextureOptions::LINEAR
+        }
+    }
+
     /// An interactive view of the open photo: slider drags redo only the stages they feed, and a
     /// draft that finishes late still replaces older pixels.
     pub fn is_view(self) -> bool {
@@ -1111,7 +1133,7 @@ impl Renderer {
             let color = color.unwrap_or_else(|| Arc::new(color_image(img)));
             let pixels = self.keep_pixels.then(|| color.clone());
             let name = format!("{slot:?}");
-            let options = if full_res { PHOTO_TEXTURE } else { egui::TextureOptions::LINEAR };
+            let options = slot.texture_options(full_res);
             match self.textures.get_mut(&slot) {
                 Some(t) => {
                     t.tex.set(color, options);
@@ -1212,14 +1234,15 @@ impl Renderer {
     /// CPU copies of the current textures by id (see [`Self::keep_pixels`]).
     pub fn cpu_textures(&self) -> HashMap<egui::TextureId, crate::softpaint::CpuTexture> {
         self.textures
-            .values()
-            .filter_map(|t| {
+            .iter()
+            .filter_map(|(slot, t)| {
+                let options = slot.texture_options(t.full_res);
                 Some((
                     t.tex.id(),
                     crate::softpaint::CpuTexture {
                         image: t.pixels.clone()?,
-                        magnification: if t.full_res { PHOTO_TEXTURE.magnification } else { egui::TextureFilter::Linear },
-                        minification: egui::TextureFilter::Linear,
+                        magnification: options.magnification,
+                        minification: options.minification,
                     },
                 ))
             })
