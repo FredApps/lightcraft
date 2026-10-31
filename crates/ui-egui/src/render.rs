@@ -133,14 +133,14 @@ impl PhotoSampling {
             _ => None,
         };
         let info = match &job.source {
-            lightcraft_engine::media::SourceRef::Loaded(s) => s.info.clone().unwrap_or_else(|| job.info.clone()),
+            lightcraft_engine::media::SourceRef::Loaded(s) => s.info_or(job.info.clone()),
             _ => job.info.clone(),
         };
         Self { settings: job.settings.clone(), request: job.request, info, source, photo: job.slide.is_none() && job.preview_cut.is_none() }
     }
 
     fn full_res(&self, r: &RenderResult) -> bool {
-        if !self.photo || r.quick.is_some() || r.level != lightcraft_engine::SourceLevel::Full {
+        if !self.photo || r.quick.is_some() {
             return false;
         }
         let source = r.loaded.as_ref();
@@ -148,8 +148,10 @@ impl PhotoSampling {
         if proxy || w == 0 || h == 0 {
             return false;
         }
-        let info = source.and_then(|s| s.info.as_ref()).unwrap_or(&self.info);
-        if info.native_long.is_some_and(|n| n > w.max(h)) {
+        let info = source.map_or_else(|| self.info.clone(), |s| s.info_or(self.info.clone()));
+        // A small original can fit in Thumb or Preview without losing any pixels. The cache
+        // level alone is not proof of reduction; require its known native size at those levels.
+        if info.native_long.is_some_and(|n| n > w.max(h)) || (r.level != lightcraft_engine::SourceLevel::Full && info.native_long != Some(w.max(h))) {
             return false;
         }
         let frame = lightcraft_pipeline::geometry::Frame::with_lens(w, h, &self.settings, self.request.apply_crop, info.lens.as_ref());
