@@ -110,7 +110,7 @@ fn prepare_guarded(
     let recovered = if p.meta.camera_identity.is_none() {
         match (&p.source, &session.media.file_probe) {
             (lightcraft_catalog::Source::File { path }, Some(probe)) => probe(path).ok().and_then(|info| {
-                info.meta.camera_identity.map(|identity| {
+                info.meta.camera_identity.filter(|identity| !identity.label().is_empty()).map(|identity| {
                     let mut photo = (**p).clone();
                     photo.meta.camera = identity.label();
                     photo.meta.camera_identity = Some(identity);

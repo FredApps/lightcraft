@@ -879,7 +879,12 @@ impl Session {
         // Older catalogs kept only a combined camera label. Recover the original tags without
         // inferring a manufacturer from that label or replacing the user's descriptive metadata.
         let identity = if p.meta.camera_identity.is_none() {
-            self.media.file_probe.as_ref().and_then(|probe| probe(orig).ok()).and_then(|info| info.meta.camera_identity)
+            self.media
+                .file_probe
+                .as_ref()
+                .and_then(|probe| probe(orig).ok())
+                .and_then(|info| info.meta.camera_identity)
+                .filter(|identity| !identity.label().is_empty())
         } else {
             None
         };
