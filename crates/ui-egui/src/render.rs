@@ -156,14 +156,15 @@ impl PhotoSampling {
         }
         let frame = lightcraft_pipeline::geometry::Frame::with_lens(w, h, &self.settings, self.request.apply_crop, info.lens.as_ref());
         let (fw, fh) = frame.fit(self.request.max_w, self.request.max_h);
-        let (nw, nh) = frame.native_size();
+        // Match the loupe's rounded long edge and aspect-derived short edge: rounding each
+        // fractional crop side independently can differ from the requested render by a pixel.
+        let [nw, nh] = crate::panels::detail::output_px(&frame);
+        let native = crate::panels::detail::render_size(nw.max(nh), frame.aspect() as f32);
         let expected = self.request.window.map_or((fw, fh), |win| {
             let win = win.clamped(fw, fh);
             (win.w, win.h)
         });
-        (fw as f64 - nw).abs() <= 0.5
-            && (fh as f64 - nh).abs() <= 0.5
-            && r.rendered.as_ref().is_ok_and(|x| (x.image.width, x.image.height) == expected)
+        (fw, fh) == native && r.rendered.as_ref().is_ok_and(|x| (x.image.width, x.image.height) == expected)
     }
 }
 
