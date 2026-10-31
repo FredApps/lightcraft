@@ -205,6 +205,7 @@ fn larger_texture_for_another_key_does_not_count_as_current() {
         histogram: None,
         ms: 0.0,
         quick: None,
+        full_res: false,
         pixels: None,
     };
     let mut r = Renderer::default();
@@ -1204,4 +1205,90 @@ fn undo_to_embedded_thumb_rejects_late_full_render() {
     assert_eq!(quick.quick, Some(QuickSource::Embedded));
     assert_eq!(quick.pixels.as_ref().unwrap().pixels, pixels_a);
     assert!(!app.renderer.is_pending(full_slot));
+}
+
+#[test]
+fn fractional_native_crops_use_nearest_only_at_the_native_render_size() {
+    let (mut app, _, _) = fixture();
+    for (w, h, native) in [(125, 100, (101, 81)), (100, 125, (81, 101))] {
+        let mut settings = lightcraft_develop::DevelopSettings::default();
+        settings.crop.geometry.rect = lightcraft_geom::Rect::new(0.0, 0.0, 0.8049, 0.8049);
+        let frame = lightcraft_pipeline::geometry::Frame::new(w, h, &settings, true);
+        let (nw, nh) = frame.native_size();
+        assert!((nw.min(nh) - 80.49).abs() < 1e-9);
+        assert!((nw.max(nh) - 100.6125).abs() < 1e-9);
+        for edge in [100, 101, 102] {
+            let dims = if w > h { (edge, (edge as f32 / 1.25).round() as usize) } else { ((edge as f32 / 1.25).round() as usize, edge) };
+            assert_eq!(frame.fit(dims.0, dims.1), dims);
+            for window in [None, Some(lightcraft_pipeline::PixelWindow { x: 2, y: 3, w: 10, h: 9 })] {
+                let mut job = app.session.render_job(PhotoId(1), dims.0, dims.1, false, true).unwrap();
+                job.source = lightcraft_engine::media::SourceRef::Loaded(Box::new(lightcraft_engine::media::DecodedSource::new(
+                    Arc::new(lightcraft_raster::Rgb32f::new(w, h)),
+                    Some(Default::default()),
+                )));
+                job.settings = Arc::new(settings.clone());
+                job.level = lightcraft_engine::SourceLevel::Full;
+                job.info = lightcraft_pipeline::SourceInfo { native_long: Some(w.max(h)), ..Default::default() };
+                job.request.window = window;
+                let sampling = PhotoSampling::new(&job);
+                let result = job.run();
+                let image = &result.rendered.as_ref().unwrap().image;
+                let expected = window.map_or(dims, |win| (win.w, win.h));
+                assert_eq!((image.width, image.height), expected);
+                assert_eq!(sampling.full_res(&result), dims == native, "source {w}x{h}, request {dims:?}, window {window:?}");
+            }
+        }
+    }
+}
+
+// Stand-ins and reduced renders stay smooth, even when replacing native pixels in the same slot.
+#[test]
+fn only_native_photo_pixels_use_nearest_magnification() {
+    let (mut app, work, ctx) = fixture();
+    for level in [lightcraft_engine::SourceLevel::Thumb, lightcraft_engine::SourceLevel::Preview, lightcraft_engine::SourceLevel::Full] {
+        for native_long in [None, Some(8), Some(16)] {
+            for slot in [Slot::Main, Slot::Before, Slot::Region] {
+                for (edge, window, display_fit, proxy, quick, nearest) in [
+                    (8, None, None, false, None, true),
+                    (4, None, None, false, None, false),
+                    (8, Some(lightcraft_pipeline::PixelWindow { x: 2, y: 2, w: 3, h: 3 }), None, false, None, true),
+                    (4, Some(lightcraft_pipeline::PixelWindow { x: 0, y: 0, w: 3, h: 3 }), None, false, None, false),
+                    (8, None, Some((4, 4)), false, None, false),
+                    (8, None, None, true, None, false),
+                    (8, None, None, false, Some(QuickSource::Cached), false),
+                ] {
+                    let mut job = app.session.render_job(PhotoId(1), edge, edge, false, true).unwrap();
+                    // Decoder facts must retain the catalog's original size, including when a cached
+                    // source was reduced before this job requested an otherwise 1:1 render.
+                    let mut source =
+                        lightcraft_engine::media::DecodedSource::new(Arc::new(lightcraft_raster::Rgb32f::new(8, 8)), Some(Default::default()));
+                    source.from_proxy = proxy;
+                    job.source = lightcraft_engine::media::SourceRef::Loaded(Box::new(source));
+                    job.level = level;
+                    job.info = lightcraft_pipeline::SourceInfo { native_long, ..Default::default() };
+                    job.request.window = window;
+                    job.display_fit = display_fit;
+                    job.key = lightcraft_preview::next_tick();
+                    app.renderer.request(slot, job, 100);
+                    let (_, job) = take_job(&work);
+                    let mut result = job.run();
+                    result.quick = quick;
+                    finish(&mut app, &work, &ctx, slot, result);
+                    let t = &app.renderer.textures[&slot];
+                    let nearest = nearest && native_long != Some(16) && (level == lightcraft_engine::SourceLevel::Full || native_long == Some(8));
+                    assert_eq!(
+                        t.full_res, nearest,
+                        "{slot:?}, {level:?}, native {native_long:?}, edge {edge}, window {window:?}, display fit {display_fit:?}, proxy {proxy}, quick {quick:?}"
+                    );
+                    let mut delta = ctx.tex_manager().write().take_delta();
+                    let options = delta.set.get(&t.tex.id()).and_then(|updates| updates.last()).unwrap().options;
+                    delta.clear();
+                    assert_eq!(options.magnification, if nearest { egui::TextureFilter::Nearest } else { egui::TextureFilter::Linear });
+                    assert_eq!(options.minification, egui::TextureFilter::Linear);
+                    let cpu = app.renderer.cpu_textures();
+                    assert_eq!(cpu[&t.tex.id()].magnification, options.magnification);
+                }
+            }
+        }
+    }
 }
